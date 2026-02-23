@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { JoinOrCreateClient } from "@/components/team/JoinOrCreateClient";
 
@@ -16,6 +16,14 @@ export function TeamsClient({ teams }: { teams: TeamItem[] }) {
   const router = useRouter();
   const [error, setError] = useState<string | null>(null);
   const [loadingKey, setLoadingKey] = useState<string | null>(null);
+  const [inviteCodeFromLink, setInviteCodeFromLink] = useState("");
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const invite = params.get("invite") ?? params.get("code") ?? "";
+    setInviteCodeFromLink(invite.trim().toUpperCase());
+  }, []);
 
   const callApi = async (
     key: string,
@@ -132,7 +140,7 @@ export function TeamsClient({ teams }: { teams: TeamItem[] }) {
         {error && <p className="error" style={{ marginBottom: 0 }}>{error}</p>}
       </div>
 
-      <JoinOrCreateClient redirectTo="/teams" />
+      <JoinOrCreateClient redirectTo="/teams" initialCode={inviteCodeFromLink} />
     </div>
   );
 }

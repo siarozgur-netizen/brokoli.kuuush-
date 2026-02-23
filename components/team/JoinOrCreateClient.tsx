@@ -1,16 +1,28 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function JoinOrCreateClient({ redirectTo = "/" }: { redirectTo?: string }) {
+export function JoinOrCreateClient({
+  redirectTo = "/",
+  initialCode = ""
+}: {
+  redirectTo?: string;
+  initialCode?: string;
+}) {
   const router = useRouter();
   const [teamName, setTeamName] = useState("");
-  const [code, setCode] = useState("");
+  const [code, setCode] = useState(initialCode.toUpperCase());
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState<"create" | "join" | null>(null);
   const [toast, setToast] = useState<{ type: "success" | "error"; message: string } | null>(null);
+
+  useEffect(() => {
+    if (initialCode) {
+      setCode(initialCode.toUpperCase());
+    }
+  }, [initialCode]);
 
   const safeJson = async (response: Response) => {
     try {

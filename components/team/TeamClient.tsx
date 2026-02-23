@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 
 type Invite = {
   id: string;
@@ -14,7 +14,22 @@ export function TeamClient({ invites }: { invites: Invite[] }) {
   const [maxUses, setMaxUses] = useState("");
   const [expiresDays, setExpiresDays] = useState("");
   const [newCode, setNewCode] = useState<string | null>(null);
+  const [copiedText, setCopiedText] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const baseUrl = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return window.location.origin;
+  }, []);
+
+  const getInviteLink = (code: string) => (baseUrl ? `${baseUrl}/teams?invite=${encodeURIComponent(code)}` : "");
+
+  const copyToClipboard = async (value: string) => {
+    if (!value) return;
+    await navigator.clipboard.writeText(value);
+    setCopiedText(value);
+    setTimeout(() => setCopiedText((current) => (current === value ? null : current)), 1800);
+  };
 
   const createInvite = async (event: FormEvent) => {
     event.preventDefault();
@@ -62,7 +77,23 @@ export function TeamClient({ invites }: { invites: Invite[] }) {
             Kod Uret
           </button>
         </form>
-        {newCode && <p className="success">Yeni kod: {newCode}</p>}
+        {newCode && (
+          <div className="grid" style={{ marginTop: 10, gap: 8 }}>
+            <p className="success" style={{ margin: 0 }}>Yeni kod: {newCode}</p>
+            <div className="row" style={{ gap: 8, alignItems: "center" }}>
+              <input className="input" readOnly value={getInviteLink(newCode)} />
+              <button
+                type="button"
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => copyToClipboard(getInviteLink(newCode))}
+              >
+                Linki Kopyala
+              </button>
+            </div>
+          </div>
+        )}
+        {copiedText && <p className="success" style={{ marginTop: 8 }}>Link kopyalandi.</p>}
         {error && <p className="error">{error}</p>}
       </div>
 
@@ -75,6 +106,7 @@ export function TeamClient({ invites }: { invites: Invite[] }) {
                 <th>Kod</th>
                 <th>Kullanim</th>
                 <th>Bitis</th>
+                <th>Link</th>
               </tr>
             </thead>
             <tbody>
@@ -86,6 +118,16 @@ export function TeamClient({ invites }: { invites: Invite[] }) {
                     {invite.max_uses ? ` / ${invite.max_uses}` : " / limitsiz"}
                   </td>
                   <td>{invite.expires_at ? new Date(invite.expires_at).toLocaleString("tr-TR") : "Yok"}</td>
+                  <td>
+                    <button
+                      type="button"
+                      className="button secondary"
+                      style={{ width: "auto" }}
+                      onClick={() => copyToClipboard(getInviteLink(invite.code))}
+                    >
+                      Linki Kopyala
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -100,6 +142,14 @@ export function TeamClient({ invites }: { invites: Invite[] }) {
                 {invite.max_uses ? ` / ${invite.max_uses}` : " / limitsiz"}
               </p>
               <p><strong>Bitis:</strong> {invite.expires_at ? new Date(invite.expires_at).toLocaleString("tr-TR") : "Yok"}</p>
+              <button
+                type="button"
+                className="button secondary"
+                style={{ width: "auto" }}
+                onClick={() => copyToClipboard(getInviteLink(invite.code))}
+              >
+                Linki Kopyala
+              </button>
             </div>
           ))}
           {!invites.length && <p className="muted">Davet kodu yok.</p>}
