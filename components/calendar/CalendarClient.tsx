@@ -53,6 +53,7 @@ export function CalendarClient({
   const [error, setError] = useState<string | null>(null);
   const reloadSeqRef = useRef(0);
   const appliedSeqRef = useRef(0);
+  const deletedIdsRef = useRef<Set<string>>(new Set());
 
   const reloadPurchases = async () => {
     const seq = ++reloadSeqRef.current;
@@ -60,7 +61,9 @@ export function CalendarClient({
     const data = (await response.json().catch(() => ({}))) as { purchases?: PurchaseView[] };
     if (response.ok && Array.isArray(data.purchases) && seq >= appliedSeqRef.current) {
       appliedSeqRef.current = seq;
-      setPurchaseState(data.purchases);
+      setPurchaseState(
+        data.purchases.filter((item) => !deletedIdsRef.current.has(item.id))
+      );
     }
   };
 
@@ -219,6 +222,10 @@ export function CalendarClient({
           }}
           onPurchaseDeleted={(purchaseId) => {
             void (async () => {
+              deletedIdsRef.current.add(purchaseId);
+              setTimeout(() => {
+                deletedIdsRef.current.delete(purchaseId);
+              }, 60000);
               setPurchaseState((current) => current.filter((item) => item.id !== purchaseId));
               await reloadPurchasesWithRetry();
               setEditing((current) => (current?.id === purchaseId ? null : current));

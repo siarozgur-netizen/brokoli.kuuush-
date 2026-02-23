@@ -36,10 +36,30 @@ export async function POST(request: Request) {
 
     const nextAdmin = otherMembers?.[0];
     if (!nextAdmin) {
-      return NextResponse.json(
-        { error: "Takimda baska uye yok. Once bir uye ekleyin veya takimi silin." },
-        { status: 400 }
-      );
+      const { error: deleteError } = await admin.from("teams").delete().eq("id", teamId);
+      if (deleteError) {
+        return NextResponse.json({ error: deleteError.message }, { status: 400 });
+      }
+
+      const { data: remainingMemberships } = await admin
+        .from("team_members")
+        .select("team_id, created_at")
+        .eq("user_id", session.user.id)
+        .order("created_at", { ascending: true });
+
+      const nextTeamId = remainingMemberships?.[0]?.team_id ?? null;
+      await setActiveTeamForUser(session.user.id, nextTeamId);
+
+      return NextResponse.json({ ok: true, deleted_team: true });
+    }
+    const { error: leaveError } = await admin
+      .from("team_members")
+      .delete()
+      .eq("team_id", teamId)
+      .eq("user_id", session.user.id);
+
+    if (leaveError) {
+      return NextResponse.json({ error: leaveError.message }, { status: 400 });
     }
 
     const { error: promoteError } = await admin
@@ -49,18 +69,24 @@ export async function POST(request: Request) {
       .eq("user_id", nextAdmin.user_id);
 
     if (promoteError) {
+      // Best-effort rollback: restore previous admin membership
+      await admin.from("team_members").insert({
+        team_id: teamId,
+        user_id: session.user.id,
+        role: "admin"
+      });
       return NextResponse.json({ error: promoteError.message }, { status: 400 });
     }
-  }
+  } else {
+    const { error: leaveError } = await admin
+      .from("team_members")
+      .delete()
+      .eq("team_id", teamId)
+      .eq("user_id", session.user.id);
 
-  const { error: leaveError } = await admin
-    .from("team_members")
-    .delete()
-    .eq("team_id", teamId)
-    .eq("user_id", session.user.id);
-
-  if (leaveError) {
-    return NextResponse.json({ error: leaveError.message }, { status: 400 });
+    if (leaveError) {
+      return NextResponse.json({ error: leaveError.message }, { status: 400 });
+    }
   }
 
   const { data: remainingMemberships } = await admin
