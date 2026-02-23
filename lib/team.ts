@@ -8,6 +8,7 @@ export type Membership = {
   team_id: string;
   role: "admin" | "member";
   team_name: string;
+  created_at?: string;
 };
 
 export async function getCurrentUser() {
@@ -16,24 +17,72 @@ export async function getCurrentUser() {
   return data.user ?? null;
 }
 
-export async function getMembership(userId: string): Promise<Membership | null> {
+export async function getMemberships(userId: string): Promise<Membership[]> {
   const supabase = await createClient();
   const { data } = await supabase
     .from("team_members")
-    .select("team_id, role, teams(name)")
+    .select("team_id, role, created_at, teams(name)")
     .eq("user_id", userId)
-    .maybeSingle();
+    .order("created_at", { ascending: true });
 
-  if (!data) return null;
+  if (!data?.length) return [];
 
-  const teamRelation = data.teams as { name: string } | { name: string }[] | null;
-  const teamName = Array.isArray(teamRelation) ? teamRelation[0]?.name : teamRelation?.name;
+  return data.map((item) => {
+    const teamRelation = item.teams as { name: string } | { name: string }[] | null;
+    const teamName = Array.isArray(teamRelation) ? teamRelation[0]?.name : teamRelation?.name;
+    return {
+      team_id: item.team_id,
+      role: item.role,
+      team_name: teamName ?? "Takim",
+      created_at: item.created_at
+    };
+  });
+}
 
-  return {
-    team_id: data.team_id,
-    role: data.role,
-    team_name: teamName ?? "Takim"
-  };
+export async function setActiveTeamForUser(userId: string, teamId: string | null) {
+  try {
+    const admin = createAdminClient();
+    if (!teamId) {
+      await admin.from("user_active_teams").delete().eq("user_id", userId);
+      return;
+    }
+
+    await admin.from("user_active_teams").upsert(
+      {
+        user_id: userId,
+        team_id: teamId,
+        updated_at: new Date().toISOString()
+      },
+      { onConflict: "user_id" }
+    );
+  } catch {
+    // Backward compatibility when migration is not applied yet.
+  }
+}
+
+export async function getMembership(userId: string): Promise<Membership | null> {
+  const memberships = await getMemberships(userId);
+  if (!memberships.length) return null;
+
+  let activeTeamId: string | null = null;
+  try {
+    const supabase = await createClient();
+    const { data: activeRow } = await supabase
+      .from("user_active_teams")
+      .select("team_id")
+      .eq("user_id", userId)
+      .maybeSingle();
+    activeTeamId = activeRow?.team_id ?? null;
+  } catch {
+    activeTeamId = null;
+  }
+
+  const activeMembership = memberships.find((item) => item.team_id === activeTeamId) ?? memberships[0];
+  if (!activeTeamId || activeMembership.team_id !== activeTeamId) {
+    await setActiveTeamForUser(userId, activeMembership.team_id);
+  }
+
+  return activeMembership;
 }
 
 export async function requireAuth() {
@@ -46,7 +95,7 @@ export async function requireMembership() {
   const user = await requireAuth();
   const membership = await getMembership(user.id);
 
-  if (!membership) redirect("/join");
+  if (!membership) redirect("/teams");
 
   await ensurePersonRow(user, membership.team_id);
 

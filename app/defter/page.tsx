@@ -1,10 +1,9 @@
 import { DefterClient } from "@/components/defter/DefterClient";
 import {
-  applyPaymentsToBalances,
   applyPaymentsToTransfers,
-  computeBalances,
   computeDirectTransfersFromPurchases,
-  netPairTransfers
+  netPairTransfers,
+  normalizePaymentsForCurrentDebts
 } from "@/lib/settlement";
 import { createClient } from "@/lib/supabase/server";
 import { requireMembership } from "@/lib/team";
@@ -98,25 +97,21 @@ export default async function DefterPage({
     confirmed_at: row.confirmed_at
   }));
 
-  const confirmedPayments = normalizedPayments.filter((item) => item.status === "confirmed");
-
-  const allBalances = applyPaymentsToBalances(
-    computeBalances(normalized),
-    confirmedPayments.map((item) => ({
-      from_person_id: item.from_person_id,
-      to_person_id: item.to_person_id,
-      amount: item.amount
-    })),
-    peopleMap
+  const confirmedPayments = normalizedPayments.filter(
+    (item) => item.status === "confirmed" && item.confirmed_by_person_id
   );
+  const allBaseTransfers = computeDirectTransfersFromPurchases(normalized);
+  const allPaymentInputs = confirmedPayments.map((item) => ({
+    from_person_id: item.from_person_id,
+    to_person_id: item.to_person_id,
+    amount: item.amount
+  }));
+  const allNormalizedPayments = normalizePaymentsForCurrentDebts(allBaseTransfers, allPaymentInputs);
+
   const allTransfers = netPairTransfers(
     applyPaymentsToTransfers(
-      computeDirectTransfersFromPurchases(normalized),
-      confirmedPayments.map((item) => ({
-        from_person_id: item.from_person_id,
-        to_person_id: item.to_person_id,
-        amount: item.amount
-      })),
+      allBaseTransfers,
+      allNormalizedPayments,
       peopleMap
     )
   );
@@ -124,23 +119,17 @@ export default async function DefterPage({
 
   const periodPurchases = normalized.filter((purchase) => purchase.date >= start && purchase.date < end);
   const periodPayments = confirmedPayments.filter((item) => item.paid_at >= start && item.paid_at < end);
-  const periodBalances = applyPaymentsToBalances(
-    computeBalances(periodPurchases),
-    periodPayments.map((item) => ({
-      from_person_id: item.from_person_id,
-      to_person_id: item.to_person_id,
-      amount: item.amount
-    })),
-    peopleMap
-  );
+  const periodBaseTransfers = computeDirectTransfersFromPurchases(periodPurchases);
+  const periodPaymentInputs = periodPayments.map((item) => ({
+    from_person_id: item.from_person_id,
+    to_person_id: item.to_person_id,
+    amount: item.amount
+  }));
+  const periodNormalizedPayments = normalizePaymentsForCurrentDebts(periodBaseTransfers, periodPaymentInputs);
   const periodTransfers = netPairTransfers(
     applyPaymentsToTransfers(
-      computeDirectTransfersFromPurchases(periodPurchases),
-      periodPayments.map((item) => ({
-        from_person_id: item.from_person_id,
-        to_person_id: item.to_person_id,
-        amount: item.amount
-      })),
+      periodBaseTransfers,
+      periodNormalizedPayments,
       peopleMap
     )
   );
@@ -169,8 +158,6 @@ export default async function DefterPage({
         periodCount={periodPurchases.length}
         allTransfers={allTransfers}
         periodTransfers={periodTransfers}
-        allBalances={allBalances}
-        periodBalances={periodBalances}
         paymentLogs={normalizedPayments}
         mePersonId={mePerson?.id ?? null}
         mePersonName={mePerson?.name ?? null}

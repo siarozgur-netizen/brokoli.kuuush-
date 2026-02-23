@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { revalidatePath } from "next/cache";
 import { requireApiMembership } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizePurchasePayload } from "@/lib/validators";
 
 function mapPurchaseRow(purchase: {
@@ -8,6 +9,7 @@ function mapPurchaseRow(purchase: {
   date: string;
   total_amount: number | string;
   purchase_type: string | null;
+  created_by: string;
   purchase_splits:
     | {
         person_id: string;
@@ -22,6 +24,7 @@ function mapPurchaseRow(purchase: {
     date: purchase.date,
     total_amount: Number(purchase.total_amount),
     purchase_type: purchase.purchase_type === "munchies" ? "munchies" : "satin_alim",
+    created_by: purchase.created_by,
     splits: (purchase.purchase_splits ?? []).map((split) => {
       const relation = split.people;
       const personName = Array.isArray(relation) ? relation[0]?.name ?? "Bilinmiyor" : relation?.name ?? "Bilinmiyor";
@@ -103,9 +106,16 @@ export async function PATCH(request: Request, context: { params: { id: string } 
   const { error: splitError } = await session.supabase.from("purchase_splits").insert(payload);
   if (splitError) return NextResponse.json({ error: splitError.message }, { status: 400 });
 
+  // Trigger a purchases change event after splits are fully written.
+  await session.supabase
+    .from("purchases")
+    .update({ updated_at: new Date().toISOString() })
+    .eq("id", context.params.id)
+    .eq("team_id", session.membership.team_id);
+
   const { data: purchaseView, error: purchaseViewError } = await session.supabase
     .from("purchases")
-    .select("id, date, total_amount, purchase_type, purchase_splits(person_id, percentage, amount, people(name))")
+    .select("id, date, total_amount, purchase_type, created_by, purchase_splits(person_id, percentage, amount, people(name))")
     .eq("team_id", session.membership.team_id)
     .eq("id", context.params.id)
     .single();
@@ -127,11 +137,27 @@ export async function DELETE(_: Request, context: { params: { id: string } }) {
   const session = await requireApiMembership();
   if ("error" in session) return session.error;
 
-  if (session.membership.role !== "admin") {
-    return NextResponse.json({ error: "Silme sadece admin icin acik." }, { status: 403 });
+  const { data: purchase, error: purchaseError } = await session.supabase
+    .from("purchases")
+    .select("id, created_by")
+    .eq("id", context.params.id)
+    .eq("team_id", session.membership.team_id)
+    .maybeSingle();
+
+  if (purchaseError || !purchase) {
+    return NextResponse.json({ error: "Kayit bulunamadi." }, { status: 404 });
   }
 
-  const { error } = await session.supabase
+  const canDelete =
+    session.membership.role === "admin" ||
+    purchase.created_by === session.user.id;
+  if (!canDelete) {
+    return NextResponse.json({ error: "Sadece admin veya kaydi olusturan kisi silebilir." }, { status: 403 });
+  }
+
+  const admin = createAdminClient();
+
+  const { error } = await admin
     .from("purchases")
     .delete()
     .eq("id", context.params.id)

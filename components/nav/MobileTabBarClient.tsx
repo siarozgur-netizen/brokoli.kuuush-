@@ -6,7 +6,8 @@ const ITEMS = [
   { href: "/", label: "Takvim", icon: "📅" },
   { href: "/defter", label: "Defter", icon: "📒" },
   { href: "/report", label: "Rapor", icon: "📊" },
-  { href: "/team", label: "Takim", icon: "👥" }
+  { href: "/team", label: "Takim", icon: "👥" },
+  { href: "/teams", label: "Takimlarim", icon: "🗂️" }
 ];
 
 export function MobileTabBarClient() {

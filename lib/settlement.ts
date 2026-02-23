@@ -32,62 +32,83 @@ export type SettlementPayment = {
   amount: number;
 };
 
-const round2 = (value: number) => Number(value.toFixed(2));
 const MIN_TRANSFER_AMOUNT = 20;
+const MIN_TRANSFER_CENTS = MIN_TRANSFER_AMOUNT * 100;
+const EPS_CENTS = 1;
 
-function equalShares(totalAmount: number, count: number) {
-  const totalCents = Math.round(totalAmount * 100);
+const toCents = (value: number) => Math.round((Number(value) || 0) * 100);
+const fromCents = (value: number) => Number((value / 100).toFixed(2));
+
+function getEffectivePurchaseTotalCents(purchase: SettlementPurchase) {
+  const splitsTotalCents = purchase.splits.reduce((sum, split) => sum + toCents(split.amount), 0);
+  const purchaseTotalCents = toCents(purchase.total_amount);
+
+  // Legacy safety: if stored total is stale/incorrect, trust split totals.
+  if (splitsTotalCents > 0 && Math.abs(splitsTotalCents - purchaseTotalCents) > EPS_CENTS) {
+    return splitsTotalCents;
+  }
+  return purchaseTotalCents;
+}
+
+function equalSharesCents(totalCents: number, count: number) {
   const base = Math.floor(totalCents / count);
   const remainder = totalCents - base * count;
 
-  return Array.from({ length: count }, (_, index) =>
-    (base + (index === count - 1 ? remainder : 0)) / 100
-  );
+  return Array.from({ length: count }, (_, index) => base + (index < remainder ? 1 : 0));
 }
 
 export function computeBalances(purchases: SettlementPurchase[]): PersonBalance[] {
-  const byPerson = new Map<string, PersonBalance>();
+  const byPerson = new Map<string, { person_id: string; person_name: string; paid_cents: number; owed_cents: number }>();
 
   purchases.forEach((purchase) => {
     if (!purchase.splits.length) return;
 
-    const shares = equalShares(purchase.total_amount, purchase.splits.length);
+    const effectiveTotalCents = getEffectivePurchaseTotalCents(purchase);
+    const sharesCents = equalSharesCents(effectiveTotalCents, purchase.splits.length);
 
     purchase.splits.forEach((split, index) => {
       const current = byPerson.get(split.person_id) ?? {
         person_id: split.person_id,
         person_name: split.person_name,
-        paid: 0,
-        owed: 0,
-        net: 0
+        paid_cents: 0,
+        owed_cents: 0
       };
 
-      current.paid += Number(split.amount);
-      current.owed += shares[index];
+      current.paid_cents += toCents(split.amount);
+      current.owed_cents += sharesCents[index];
       byPerson.set(split.person_id, current);
     });
   });
 
-  const balances = [...byPerson.values()].map((person) => ({
-    ...person,
-    paid: round2(person.paid),
-    owed: round2(person.owed),
-    net: round2(person.paid - person.owed)
-  }));
-
-  return balances.sort((a, b) => b.net - a.net);
+  return [...byPerson.values()]
+    .map((person) => ({
+      person_id: person.person_id,
+      person_name: person.person_name,
+      paid: fromCents(person.paid_cents),
+      owed: fromCents(person.owed_cents),
+      net: fromCents(person.paid_cents - person.owed_cents)
+    }))
+    .sort((a, b) => b.net - a.net);
 }
 
 export function computeTransfers(balances: PersonBalance[]): SettlementTransfer[] {
   const creditors = balances
-    .filter((person) => person.net > 0.009)
-    .map((person) => ({ ...person }))
-    .sort((a, b) => b.net - a.net);
+    .map((person) => ({
+      person_id: person.person_id,
+      person_name: person.person_name,
+      net_cents: toCents(person.net)
+    }))
+    .filter((person) => person.net_cents > EPS_CENTS)
+    .sort((a, b) => b.net_cents - a.net_cents);
 
   const debtors = balances
-    .filter((person) => person.net < -0.009)
-    .map((person) => ({ ...person, net: Math.abs(person.net) }))
-    .sort((a, b) => b.net - a.net);
+    .map((person) => ({
+      person_id: person.person_id,
+      person_name: person.person_name,
+      debt_cents: Math.abs(toCents(person.net))
+    }))
+    .filter((person) => person.debt_cents > EPS_CENTS)
+    .sort((a, b) => b.debt_cents - a.debt_cents);
 
   const transfers: SettlementTransfer[] = [];
   let c = 0;
@@ -97,62 +118,65 @@ export function computeTransfers(balances: PersonBalance[]): SettlementTransfer[
     const creditor = creditors[c];
     const debtor = debtors[d];
 
-    const amount = round2(Math.min(creditor.net, debtor.net));
+    const amountCents = Math.min(creditor.net_cents, debtor.debt_cents);
 
-    if (amount >= MIN_TRANSFER_AMOUNT) {
+    if (amountCents >= MIN_TRANSFER_CENTS) {
       transfers.push({
         from_id: debtor.person_id,
         from_name: debtor.person_name,
         to_id: creditor.person_id,
         to_name: creditor.person_name,
-        amount
+        amount: fromCents(amountCents)
       });
     }
 
-    creditor.net = round2(creditor.net - amount);
-    debtor.net = round2(debtor.net - amount);
+    creditor.net_cents -= amountCents;
+    debtor.debt_cents -= amountCents;
 
-    if (creditor.net <= 0.009) c += 1;
-    if (debtor.net <= 0.009) d += 1;
+    if (creditor.net_cents <= EPS_CENTS) c += 1;
+    if (debtor.debt_cents <= EPS_CENTS) d += 1;
   }
 
   return transfers;
 }
 
 export function computeDirectTransfersFromPurchases(purchases: SettlementPurchase[]): SettlementTransfer[] {
-  const transferMap = new Map<string, SettlementTransfer>();
+  const pairAmountCents = new Map<string, number>();
+  const pairMeta = new Map<string, { from_id: string; from_name: string; to_id: string; to_name: string }>();
 
   const addTransfer = (transfer: SettlementTransfer) => {
     const key = `${transfer.from_id}::${transfer.to_id}`;
-    const current = transferMap.get(key);
-    if (!current) {
-      transferMap.set(key, { ...transfer, amount: round2(transfer.amount) });
-      return;
-    }
-    current.amount = round2(current.amount + transfer.amount);
-    transferMap.set(key, current);
+    const current = pairAmountCents.get(key) ?? 0;
+    pairAmountCents.set(key, current + toCents(transfer.amount));
+    pairMeta.set(key, {
+      from_id: transfer.from_id,
+      from_name: transfer.from_name,
+      to_id: transfer.to_id,
+      to_name: transfer.to_name
+    });
   };
 
   purchases.forEach((purchase) => {
     if (!purchase.splits.length) return;
 
-    const shares = equalShares(purchase.total_amount, purchase.splits.length);
-    const creditors: Array<{ person_id: string; person_name: string; amount: number }> = [];
-    const debtors: Array<{ person_id: string; person_name: string; amount: number }> = [];
+    const effectiveTotalCents = getEffectivePurchaseTotalCents(purchase);
+    const sharesCents = equalSharesCents(effectiveTotalCents, purchase.splits.length);
+    const creditors: Array<{ person_id: string; person_name: string; amount_cents: number }> = [];
+    const debtors: Array<{ person_id: string; person_name: string; amount_cents: number }> = [];
 
     purchase.splits.forEach((split, index) => {
-      const delta = round2(Number(split.amount) - shares[index]);
-      if (delta > 0.009) {
+      const deltaCents = toCents(split.amount) - sharesCents[index];
+      if (deltaCents > EPS_CENTS) {
         creditors.push({
           person_id: split.person_id,
           person_name: split.person_name,
-          amount: delta
+          amount_cents: deltaCents
         });
-      } else if (delta < -0.009) {
+      } else if (deltaCents < -EPS_CENTS) {
         debtors.push({
           person_id: split.person_id,
           person_name: split.person_name,
-          amount: Math.abs(delta)
+          amount_cents: Math.abs(deltaCents)
         });
       }
     });
@@ -162,28 +186,39 @@ export function computeDirectTransfersFromPurchases(purchases: SettlementPurchas
     while (c < creditors.length && d < debtors.length) {
       const creditor = creditors[c];
       const debtor = debtors[d];
-      const amount = round2(Math.min(creditor.amount, debtor.amount));
+      const amountCents = Math.min(creditor.amount_cents, debtor.amount_cents);
 
-      if (amount > 0.009) {
+      if (amountCents > EPS_CENTS) {
         addTransfer({
           from_id: debtor.person_id,
           from_name: debtor.person_name,
           to_id: creditor.person_id,
           to_name: creditor.person_name,
-          amount
+          amount: fromCents(amountCents)
         });
       }
 
-      creditor.amount = round2(creditor.amount - amount);
-      debtor.amount = round2(debtor.amount - amount);
+      creditor.amount_cents -= amountCents;
+      debtor.amount_cents -= amountCents;
 
-      if (creditor.amount <= 0.009) c += 1;
-      if (debtor.amount <= 0.009) d += 1;
+      if (creditor.amount_cents <= EPS_CENTS) c += 1;
+      if (debtor.amount_cents <= EPS_CENTS) d += 1;
     }
   });
 
-  return [...transferMap.values()]
-    .filter((item) => item.amount >= MIN_TRANSFER_AMOUNT)
+  return [...pairAmountCents.entries()]
+    .flatMap(([key, amountCents]) => {
+      const meta = pairMeta.get(key);
+      if (!meta) return [];
+      const next: SettlementTransfer = {
+        from_id: meta.from_id,
+        from_name: meta.from_name,
+        to_id: meta.to_id,
+        to_name: meta.to_name,
+        amount: fromCents(amountCents)
+      };
+      return toCents(next.amount) >= MIN_TRANSFER_CENTS ? [next] : [];
+    })
     .sort((a, b) => b.amount - a.amount);
 }
 
@@ -192,43 +227,86 @@ export function applyPaymentsToTransfers(
   payments: SettlementPayment[],
   names?: Record<string, string>
 ) {
-  const transferMap = new Map<string, SettlementTransfer>();
+  const pairAmountCents = new Map<string, number>();
+  const pairMeta = new Map<string, { from_id: string; from_name: string; to_id: string; to_name: string }>();
 
-  const addTransfer = (transfer: SettlementTransfer) => {
+  transfers.forEach((transfer) => {
     const key = `${transfer.from_id}::${transfer.to_id}`;
-    const current = transferMap.get(key);
-    if (!current) {
-      transferMap.set(key, { ...transfer, amount: round2(transfer.amount) });
-      return;
-    }
-    current.amount = round2(current.amount + transfer.amount);
-    transferMap.set(key, current);
-  };
-
-  transfers.forEach((transfer) => addTransfer(transfer));
+    pairAmountCents.set(key, (pairAmountCents.get(key) ?? 0) + toCents(transfer.amount));
+    pairMeta.set(key, {
+      from_id: transfer.from_id,
+      from_name: transfer.from_name,
+      to_id: transfer.to_id,
+      to_name: transfer.to_name
+    });
+  });
 
   payments.forEach((payment) => {
     const key = `${payment.from_person_id}::${payment.to_person_id}`;
-    const current = transferMap.get(key) ?? {
-      from_id: payment.from_person_id,
-      from_name: names?.[payment.from_person_id] ?? "Bilinmiyor",
-      to_id: payment.to_person_id,
-      to_name: names?.[payment.to_person_id] ?? "Bilinmiyor",
-      amount: 0
-    };
+    const current = pairAmountCents.get(key) ?? 0;
+    const next = current - toCents(payment.amount);
+    const fromName = names?.[payment.from_person_id] ?? pairMeta.get(key)?.from_name ?? "Bilinmiyor";
+    const toName = names?.[payment.to_person_id] ?? pairMeta.get(key)?.to_name ?? "Bilinmiyor";
 
-    const nextAmount = round2(current.amount - payment.amount);
-    if (nextAmount >= MIN_TRANSFER_AMOUNT) {
-      transferMap.set(key, { ...current, amount: nextAmount });
+    if (next >= MIN_TRANSFER_CENTS) {
+      pairAmountCents.set(key, next);
+      pairMeta.set(key, {
+        from_id: payment.from_person_id,
+        from_name: fromName,
+        to_id: payment.to_person_id,
+        to_name: toName
+      });
       return;
     }
 
-    transferMap.delete(key);
+    pairAmountCents.delete(key);
+    pairMeta.delete(key);
   });
 
-  return [...transferMap.values()]
-    .filter((item) => item.amount >= MIN_TRANSFER_AMOUNT)
+  return [...pairAmountCents.entries()]
+    .flatMap(([key, amountCents]) => {
+      const meta = pairMeta.get(key);
+      if (!meta) return [];
+      const next: SettlementTransfer = {
+        from_id: meta.from_id,
+        from_name: meta.from_name,
+        to_id: meta.to_id,
+        to_name: meta.to_name,
+        amount: fromCents(amountCents)
+      };
+      return toCents(next.amount) >= MIN_TRANSFER_CENTS ? [next] : [];
+    })
     .sort((a, b) => b.amount - a.amount);
+}
+
+export function normalizePaymentsForCurrentDebts(
+  transfers: SettlementTransfer[],
+  payments: SettlementPayment[]
+) {
+  const remainingByPair = new Map<string, number>();
+  transfers.forEach((item) => {
+    const key = `${item.from_id}::${item.to_id}`;
+    remainingByPair.set(key, (remainingByPair.get(key) ?? 0) + toCents(item.amount));
+  });
+
+  const normalized: SettlementPayment[] = [];
+  payments.forEach((payment) => {
+    const key = `${payment.from_person_id}::${payment.to_person_id}`;
+    const remaining = remainingByPair.get(key) ?? 0;
+    if (remaining <= EPS_CENTS) return;
+
+    const appliedCents = Math.min(remaining, toCents(payment.amount));
+    if (appliedCents <= EPS_CENTS) return;
+
+    normalized.push({
+      from_person_id: payment.from_person_id,
+      to_person_id: payment.to_person_id,
+      amount: fromCents(appliedCents)
+    });
+    remainingByPair.set(key, remaining - appliedCents);
+  });
+
+  return normalized;
 }
 
 export function netPairTransfers(transfers: SettlementTransfer[]) {
@@ -241,25 +319,22 @@ export function netPairTransfers(transfers: SettlementTransfer[]) {
 
     const [a, b] = [item.from_id, item.to_id].sort();
     const key = `${a}::${b}`;
-    const current = pairMap.get(key) ?? 0;
-
-    // Positive means a -> b, negative means b -> a
-    const signed = item.from_id === a ? item.amount : -item.amount;
-    pairMap.set(key, round2(current + signed));
+    const signed = item.from_id === a ? toCents(item.amount) : -toCents(item.amount);
+    pairMap.set(key, (pairMap.get(key) ?? 0) + signed);
   });
 
   const result: SettlementTransfer[] = [];
-  pairMap.forEach((signedAmount, key) => {
-    if (Math.abs(signedAmount) < MIN_TRANSFER_AMOUNT) return;
+  pairMap.forEach((signedAmountCents, key) => {
+    if (Math.abs(signedAmountCents) < MIN_TRANSFER_CENTS) return;
     const [a, b] = key.split("::");
 
-    if (signedAmount > 0) {
+    if (signedAmountCents > 0) {
       result.push({
         from_id: a,
         from_name: names.get(a) ?? "Bilinmiyor",
         to_id: b,
         to_name: names.get(b) ?? "Bilinmiyor",
-        amount: round2(Math.abs(signedAmount))
+        amount: fromCents(Math.abs(signedAmountCents))
       });
       return;
     }
@@ -269,7 +344,7 @@ export function netPairTransfers(transfers: SettlementTransfer[]) {
       from_name: names.get(b) ?? "Bilinmiyor",
       to_id: a,
       to_name: names.get(a) ?? "Bilinmiyor",
-      amount: round2(Math.abs(signedAmount))
+      amount: fromCents(Math.abs(signedAmountCents))
     });
   });
 
@@ -281,31 +356,35 @@ export function applyPaymentsToBalances(
   payments: SettlementPayment[],
   names?: Record<string, string>
 ) {
-  const byPerson = new Map<string, PersonBalance>();
+  const byPerson = new Map<string, { person_id: string; person_name: string; paid_cents: number; owed_cents: number }>();
 
   balances.forEach((balance) => {
-    byPerson.set(balance.person_id, { ...balance });
+    byPerson.set(balance.person_id, {
+      person_id: balance.person_id,
+      person_name: balance.person_name,
+      paid_cents: toCents(balance.paid),
+      owed_cents: toCents(balance.owed)
+    });
   });
 
   payments.forEach((payment) => {
     const fromCurrent = byPerson.get(payment.from_person_id) ?? {
       person_id: payment.from_person_id,
       person_name: names?.[payment.from_person_id] ?? "Bilinmiyor",
-      paid: 0,
-      owed: 0,
-      net: 0
+      paid_cents: 0,
+      owed_cents: 0
     };
 
     const toCurrent = byPerson.get(payment.to_person_id) ?? {
       person_id: payment.to_person_id,
       person_name: names?.[payment.to_person_id] ?? "Bilinmiyor",
-      paid: 0,
-      owed: 0,
-      net: 0
+      paid_cents: 0,
+      owed_cents: 0
     };
 
-    fromCurrent.paid += payment.amount;
-    toCurrent.owed += payment.amount;
+    const paymentCents = toCents(payment.amount);
+    fromCurrent.paid_cents += paymentCents;
+    toCurrent.owed_cents += paymentCents;
 
     byPerson.set(fromCurrent.person_id, fromCurrent);
     byPerson.set(toCurrent.person_id, toCurrent);
@@ -313,10 +392,11 @@ export function applyPaymentsToBalances(
 
   return [...byPerson.values()]
     .map((person) => ({
-      ...person,
-      paid: round2(person.paid),
-      owed: round2(person.owed),
-      net: round2(person.paid - person.owed)
+      person_id: person.person_id,
+      person_name: person.person_name,
+      paid: fromCents(person.paid_cents),
+      owed: fromCents(person.owed_cents),
+      net: fromCents(person.paid_cents - person.owed_cents)
     }))
     .sort((a, b) => b.net - a.net);
 }

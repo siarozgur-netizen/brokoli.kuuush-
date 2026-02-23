@@ -57,7 +57,7 @@ export async function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </div>
       <main className="container">{children}</main>
-      {user && membership && <MobileTabBarClient />}
+      {user && <MobileTabBarClient />}
     </>
   );
 }

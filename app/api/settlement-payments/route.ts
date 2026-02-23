@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiMembership } from "@/lib/api-auth";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeSettlementPaymentPayload } from "@/lib/validators";
 
 async function getCurrentPersonId(session: Awaited<ReturnType<typeof requireApiMembership>>) {
@@ -45,7 +46,8 @@ export async function POST(request: Request) {
   }
 
   const directConfirm = currentPersonId === normalized.to_person_id;
-  const { error } = await session.supabase.from("settlement_payments").insert({
+  const admin = createAdminClient();
+  const { error } = await admin.from("settlement_payments").insert({
     team_id: session.membership.team_id,
     from_person_id: normalized.from_person_id,
     to_person_id: normalized.to_person_id,
@@ -103,18 +105,36 @@ export async function PATCH(request: Request) {
   }
 
   const nextStatus = action === "confirm" ? "confirmed" : "rejected";
-  const { error: updateError } = await session.supabase
+  const admin = createAdminClient();
+  const payload = {
+    status: nextStatus,
+    confirmed_by_person_id: currentPersonId,
+    confirmed_at: new Date().toISOString()
+  };
+  const { error: updateError } = await admin
     .from("settlement_payments")
-    .update({
-      status: nextStatus,
-      confirmed_by_person_id: currentPersonId,
-      confirmed_at: new Date().toISOString()
-    })
+    .update(payload)
     .eq("id", payment.id)
     .eq("team_id", session.membership.team_id);
 
   if (updateError) {
-    return NextResponse.json({ error: updateError.message }, { status: 400 });
+    // Backward compatibility for databases missing confirmed_at.
+    if (updateError.message.includes("confirmed_at")) {
+      const { error: retryError } = await admin
+        .from("settlement_payments")
+        .update({
+          status: nextStatus,
+          confirmed_by_person_id: currentPersonId
+        })
+        .eq("id", payment.id)
+        .eq("team_id", session.membership.team_id);
+
+      if (retryError) {
+        return NextResponse.json({ error: retryError.message }, { status: 400 });
+      }
+    } else {
+      return NextResponse.json({ error: updateError.message }, { status: 400 });
+    }
   }
 
   return NextResponse.json({ ok: true });

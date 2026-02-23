@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import interactionPlugin from "@fullcalendar/interaction";
@@ -23,6 +23,7 @@ type PurchaseView = {
   date: string;
   total_amount: number;
   purchase_type: "satin_alim" | "munchies";
+  created_by: string;
   splits: SplitView[];
 };
 
@@ -36,22 +37,42 @@ export function CalendarClient({
   purchases,
   people,
   isAdmin,
-  teamId
+  teamId,
+  currentUserId
 }: {
   purchases: PurchaseView[];
   people: PersonView[];
   isAdmin: boolean;
   teamId: string;
+  currentUserId: string;
 }) {
   const [purchaseState, setPurchaseState] = useState<PurchaseView[]>(purchases);
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [addingType, setAddingType] = useState<"satin_alim" | "munchies" | null>(null);
   const [editing, setEditing] = useState<PurchaseView | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const reloadSeqRef = useRef(0);
+  const appliedSeqRef = useRef(0);
 
-  useEffect(() => {
-    setPurchaseState(purchases);
-  }, [purchases]);
+  const reloadPurchases = async () => {
+    const seq = ++reloadSeqRef.current;
+    const response = await fetch(`/api/purchases?ts=${Date.now()}`, { method: "GET", cache: "no-store" });
+    const data = (await response.json().catch(() => ({}))) as { purchases?: PurchaseView[] };
+    if (response.ok && Array.isArray(data.purchases) && seq >= appliedSeqRef.current) {
+      appliedSeqRef.current = seq;
+      setPurchaseState(data.purchases);
+    }
+  };
+
+  const reloadPurchasesWithRetry = async () => {
+    await reloadPurchases();
+    setTimeout(() => {
+      void reloadPurchases();
+    }, 220);
+    setTimeout(() => {
+      void reloadPurchases();
+    }, 700);
+  };
 
   useEffect(() => {
     const supabase = createBrowserSupabaseClient();
@@ -61,11 +82,14 @@ export function CalendarClient({
         "postgres_changes",
         { event: "*", schema: "public", table: "purchases", filter: `team_id=eq.${teamId}` },
         async () => {
-          const response = await fetch("/api/purchases", { method: "GET" });
-          const data = await response.json();
-          if (response.ok && Array.isArray(data.purchases)) {
-            setPurchaseState(data.purchases as PurchaseView[]);
-          }
+          await reloadPurchases();
+        }
+      )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "purchase_splits" },
+        async () => {
+          await reloadPurchases();
         }
       )
       .subscribe();
@@ -135,11 +159,14 @@ export function CalendarClient({
 
   return (
     <>
-      <div className="card">
+      <div className="card app-calendar-card">
         <FullCalendar
           plugins={[dayGridPlugin, interactionPlugin]}
           initialView="dayGridMonth"
           height="auto"
+          headerToolbar={{ left: "prev,next today", center: "title", right: "" }}
+          buttonText={{ today: "Bugun" }}
+          dayCellClassNames={() => ["app-day-cell"]}
           events={events}
           eventContent={renderBroccoliEvent}
           dateClick={onDateClick}
@@ -153,6 +180,7 @@ export function CalendarClient({
           purchases={dailyPurchases}
           people={people}
           isAdmin={isAdmin}
+          currentUserId={currentUserId}
           addingType={addingType}
           editing={editing}
           error={error}
@@ -176,20 +204,26 @@ export function CalendarClient({
           }}
           onError={setError}
           onPurchaseSaved={(purchase) => {
-            setPurchaseState((current) => {
-              const next = current.filter((item) => item.id !== purchase.id);
-              next.push(purchase);
-              next.sort((left, right) => right.date.localeCompare(left.date));
-              return next;
-            });
-            setAddingType(null);
-            setEditing(null);
-            setError(null);
+            void (async () => {
+              if (purchase) {
+                setPurchaseState((current) => {
+                  const filtered = current.filter((item) => item.id !== purchase.id);
+                  return [purchase, ...filtered].sort((a, b) => b.date.localeCompare(a.date));
+                });
+              }
+              await reloadPurchasesWithRetry();
+              setAddingType(null);
+              setEditing(null);
+              setError(null);
+            })();
           }}
           onPurchaseDeleted={(purchaseId) => {
-            setPurchaseState((current) => current.filter((item) => item.id !== purchaseId));
-            setEditing((current) => (current?.id === purchaseId ? null : current));
-            setError(null);
+            void (async () => {
+              setPurchaseState((current) => current.filter((item) => item.id !== purchaseId));
+              await reloadPurchasesWithRetry();
+              setEditing((current) => (current?.id === purchaseId ? null : current));
+              setError(null);
+            })();
           }}
         />
       )}
@@ -219,6 +253,7 @@ function DayModal({
   purchases,
   people,
   isAdmin,
+  currentUserId,
   addingType,
   editing,
   error,
@@ -234,6 +269,7 @@ function DayModal({
   purchases: PurchaseView[];
   people: PersonView[];
   isAdmin: boolean;
+  currentUserId: string;
   addingType: "satin_alim" | "munchies" | null;
   editing: PurchaseView | null;
   error: string | null;
@@ -242,7 +278,7 @@ function DayModal({
   onCancelForm: () => void;
   onEdit: (purchase: PurchaseView) => void;
   onError: (value: string | null) => void;
-  onPurchaseSaved: (purchase: PurchaseView) => void;
+  onPurchaseSaved: (purchase?: PurchaseView) => void;
   onPurchaseDeleted: (purchaseId: string) => void;
 }) {
   const activePeople = people.filter((person) => person.is_active);
@@ -280,6 +316,7 @@ function DayModal({
 
   return (
     <div
+      className="day-modal-overlay"
       style={{
         position: "fixed",
         inset: 0,
@@ -291,7 +328,7 @@ function DayModal({
         zIndex: 50
       }}
     >
-      <div className="card" style={{ width: "min(860px, 100%)", maxHeight: "92vh", overflow: "auto" }}>
+      <div className="card day-modal-card" style={{ width: "min(860px, 100%)", maxHeight: "92vh", overflow: "auto" }}>
         <div className="row" style={{ justifyContent: "space-between" }}>
           <h2 style={{ margin: 0 }}>{selectedDate} Gunluk Kayitlar</h2>
           <button className="button secondary" style={{ width: "auto" }} onClick={onClose}>
@@ -307,7 +344,13 @@ function DayModal({
                 Satin Alim Ekle
               </button>
             </div>
-            <PurchaseList purchases={dailySatinAlim} isAdmin={isAdmin} onEdit={onEdit} onDelete={deletePurchase} />
+            <PurchaseList
+              purchases={dailySatinAlim}
+              isAdmin={isAdmin}
+              currentUserId={currentUserId}
+              onEdit={onEdit}
+              onDelete={deletePurchase}
+            />
           </section>
 
           <section>
@@ -317,7 +360,13 @@ function DayModal({
                 Munchies Ekle
               </button>
             </div>
-            <PurchaseList purchases={dailyMunchies} isAdmin={isAdmin} onEdit={onEdit} onDelete={deletePurchase} />
+            <PurchaseList
+              purchases={dailyMunchies}
+              isAdmin={isAdmin}
+              currentUserId={currentUserId}
+              onEdit={onEdit}
+              onDelete={deletePurchase}
+            />
           </section>
         </div>
 
@@ -362,11 +411,13 @@ function DayModal({
 function PurchaseList({
   purchases,
   isAdmin,
+  currentUserId,
   onEdit,
   onDelete
 }: {
   purchases: PurchaseView[];
   isAdmin: boolean;
+  currentUserId: string;
   onEdit: (purchase: PurchaseView) => void;
   onDelete: (id: string) => Promise<void>;
 }) {
@@ -384,7 +435,7 @@ function PurchaseList({
                   Duzenle
                 </button>
               )}
-              {isAdmin && (
+              {(isAdmin || purchase.created_by === currentUserId) && (
                 <button className="button danger" style={{ width: "auto" }} onClick={() => onDelete(purchase.id)}>
                   Sil
                 </button>
@@ -420,9 +471,10 @@ function PurchaseForm({
   purchaseType: "satin_alim" | "munchies";
   canEdit: boolean;
   onError: (value: string | null) => void;
-  onSaved: (purchase: PurchaseView) => void;
+  onSaved: (purchase?: PurchaseView) => void;
   onCancel: () => void;
 }) {
+  const parseInputNumber = (raw: string) => Number(raw.replace(",", "."));
   const [formDate, setFormDate] = useState(initial?.date ?? date);
   const [total, setTotal] = useState(initial ? String(initial.total_amount) : "");
   const [selectedAmounts, setSelectedAmounts] = useState<Record<string, number>>(() => {
@@ -476,6 +528,32 @@ function PurchaseForm({
 
   const submit = async () => {
     onError(null);
+    const personIds = Object.keys(selectedAmounts);
+
+    if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+      onError("Toplam tutar 0'dan buyuk olmalidir.");
+      return;
+    }
+
+    if (!personIds.length) {
+      onError("En az bir katilimci secin.");
+      return;
+    }
+
+    const hasInvalidAmount = personIds.some((personId) => {
+      const value = Number(selectedAmounts[personId]);
+      return !Number.isFinite(value) || value < 0;
+    });
+    if (hasInvalidAmount) {
+      onError("Gecersiz tutar girdiniz. Lutfen TL degerlerini kontrol edin.");
+      return;
+    }
+
+    if (Math.abs(remaining) > 0.01) {
+      onError("Toplam tutar ile dagitilan tutar esit olmali.");
+      return;
+    }
+
     setSaving(true);
 
     const splits = Object.entries(selectedAmounts).map(([person_id, amount]) => ({
@@ -497,11 +575,7 @@ function PurchaseForm({
       return;
     }
 
-    if (data.purchase) {
-      onSaved(data.purchase as PurchaseView);
-    } else {
-      onCancel();
-    }
+    onSaved(data.purchase as PurchaseView | undefined);
   };
 
   if (initial && !canEdit) {
@@ -533,7 +607,7 @@ function PurchaseForm({
               type="number"
               step="0.01"
               value={total}
-              onChange={(event) => setTotal(event.target.value)}
+              onChange={(event) => setTotal(event.target.value.replace(",", "."))}
               placeholder="0.00"
             />
           </div>
@@ -574,7 +648,7 @@ function PurchaseForm({
                   disabled={!enabled}
                   value={enabled ? selectedAmounts[person.id] : ""}
                   onChange={(event) =>
-                    setSelectedAmounts((current) => ({ ...current, [person.id]: Number(event.target.value) }))
+                    setSelectedAmounts((current) => ({ ...current, [person.id]: parseInputNumber(event.target.value) }))
                   }
                   onClick={(event) => event.stopPropagation()}
                   placeholder="0.00"

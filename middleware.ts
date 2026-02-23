@@ -6,5 +6,8 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"]
+  matcher: [
+    // Run middleware only on application routes, not on Next internals or static files.
+    "/((?!_next|favicon.ico|.*\\..*).*)"
+  ]
 };

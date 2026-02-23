@@ -13,6 +13,7 @@ export function PeopleClient({ initialPeople }: Props) {
   const [people] = useState(initialPeople);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const reload = () => router.refresh();
 
@@ -49,13 +50,25 @@ export function PeopleClient({ initialPeople }: Props) {
   };
 
   const deletePerson = async (id: string) => {
-    const confirmed = window.confirm("Bu kisiyi silmek istiyor musunuz?");
+    const confirmed = window.confirm(
+      "Bu kisiyi silmek istiyor musunuz?\n\nBu islemle kisinin borc/alacak hesaplari, odeme kayitlari ve ilgili satin alim dagilimlari da temizlenir."
+    );
     if (!confirmed) return;
-
-    const response = await fetch(`/api/people/${id}`, { method: "DELETE" });
-    const data = await response.json();
-    if (!response.ok) setError(data.error ?? "Silme hatasi");
-    else reload();
+    setDeletingId(id);
+    setError(null);
+    try {
+      const response = await fetch(`/api/people/${id}`, { method: "DELETE" });
+      const data = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Silme hatasi");
+        return;
+      }
+      reload();
+    } catch {
+      setError("Silme istegi gonderilemedi. Internet baglantinizi kontrol edin.");
+    } finally {
+      setDeletingId(null);
+    }
   };
 
   return (
@@ -86,6 +99,7 @@ export function PeopleClient({ initialPeople }: Props) {
               onRename={(name) => updatePerson(person.id, { name })}
               onToggleActive={() => updatePerson(person.id, { is_active: !person.is_active })}
               onDelete={() => deletePerson(person.id)}
+              deleting={deletingId === person.id}
             />
           ))}
           {!people.length && <p className="muted">Henuz kisi yok.</p>}
@@ -101,12 +115,14 @@ function PersonRow({
   person,
   onRename,
   onToggleActive,
-  onDelete
+  onDelete,
+  deleting
 }: {
   person: Person;
   onRename: (name: string) => void;
   onToggleActive: () => void;
   onDelete: () => void;
+  deleting: boolean;
 }) {
   const [name, setName] = useState(person.name);
 
@@ -124,7 +140,7 @@ function PersonRow({
           {person.is_active ? "Pasif Yap" : "Aktif Yap"}
         </button>
         <button type="button" className="button danger" style={{ width: "auto" }} onClick={onDelete}>
-          Sil
+          {deleting ? "Siliniyor..." : "Sil"}
         </button>
       </div>
     </div>

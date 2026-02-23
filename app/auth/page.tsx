@@ -11,7 +11,7 @@ export default async function AuthPage() {
 
   if (user) {
     const membership = await getMembership(user.id);
-    redirect(membership ? "/" : "/join");
+    redirect(membership ? "/" : "/teams");
   }
 
   return <AuthClient />;

@@ -3,7 +3,7 @@
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
-export function JoinOrCreateClient() {
+export function JoinOrCreateClient({ redirectTo = "/" }: { redirectTo?: string }) {
   const router = useRouter();
   const [teamName, setTeamName] = useState("");
   const [code, setCode] = useState("");
@@ -46,14 +46,16 @@ export function JoinOrCreateClient() {
         setError(data.warning);
         setToast({ type: "error", message: data.warning });
       } else {
-        const message = "Takim olusturuldu. Ana sayfaya yonlendiriliyorsunuz...";
+        const message = "Takim olusturuldu. Yonlendiriliyorsunuz...";
         setSuccess(message);
         setToast({ type: "success", message });
       }
-      router.replace("/");
+      router.replace(redirectTo);
       router.refresh();
       setTimeout(() => {
-        if (window.location.pathname === "/join") window.location.assign("/");
+        if (window.location.pathname === "/join" || window.location.pathname === "/teams") {
+          window.location.assign(redirectTo);
+        }
       }, 1200);
     } catch {
       const message = "Baglanti hatasi. Lutfen tekrar deneyin.";
@@ -89,14 +91,16 @@ export function JoinOrCreateClient() {
         setError(data.warning);
         setToast({ type: "error", message: data.warning });
       } else {
-        const message = "Takima katildiniz. Ana sayfaya yonlendiriliyorsunuz...";
+        const message = "Takima katildiniz. Yonlendiriliyorsunuz...";
         setSuccess(message);
         setToast({ type: "success", message });
       }
-      router.replace("/");
+      router.replace(redirectTo);
       router.refresh();
       setTimeout(() => {
-        if (window.location.pathname === "/join") window.location.assign("/");
+        if (window.location.pathname === "/join" || window.location.pathname === "/teams") {
+          window.location.assign(redirectTo);
+        }
       }, 1200);
     } catch {
       const message = "Baglanti hatasi. Lutfen tekrar deneyin.";

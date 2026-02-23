@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatTRY } from "@/lib/currency";
-import type { PersonBalance, SettlementTransfer } from "@/lib/settlement";
+import type { SettlementTransfer } from "@/lib/settlement";
 import { createClient as createBrowserSupabaseClient } from "@/lib/supabase/browser";
 
 type PaymentLog = {
@@ -31,8 +31,6 @@ type Props = {
   periodCount: number;
   allTransfers: SettlementTransfer[];
   periodTransfers: SettlementTransfer[];
-  allBalances: PersonBalance[];
-  periodBalances: PersonBalance[];
   paymentLogs: PaymentLog[];
   mePersonId: string | null;
   mePersonName: string | null;
@@ -103,6 +101,11 @@ export function DefterClient(props: Props) {
         { event: "*", schema: "public", table: "purchases", filter: `team_id=eq.${props.teamId}` },
         scheduleRefresh
       )
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "purchase_splits" },
+        scheduleRefresh
+      )
       .subscribe();
 
     return () => {
@@ -110,6 +113,15 @@ export function DefterClient(props: Props) {
       void supabase.removeChannel(channel);
     };
   }, [props.teamId, router]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      router.refresh();
+    }, 8000);
+
+    return () => clearInterval(timer);
+  }, [router]);
 
   const pendingLogs = paymentLogs.filter((item) => item.status === "pending");
   const pendingByPair = new Set(pendingLogs.map((item) => `${item.from_person_id}::${item.to_person_id}`));
@@ -191,7 +203,11 @@ export function DefterClient(props: Props) {
       };
       setAllTransfers((current) => applyPaymentToTransfers(current, payment));
       setPeriodTransfers((current) => applyPaymentToTransfers(current, payment));
+    } else {
+      setInfo("Odeme bildirimi gonderildi. Alici ekraninda 'Onayla' tusu acildi.");
     }
+
+    router.refresh();
   };
 
   const resolvePending = async (paymentId: string, action: "confirm" | "reject") => {
@@ -237,15 +253,12 @@ export function DefterClient(props: Props) {
       setAllTransfers((current) => applyPaymentToTransfers(current, payment));
       setPeriodTransfers((current) => applyPaymentToTransfers(current, payment));
     }
+
+    router.refresh();
   };
 
   return (
-    <div className="grid" style={{ gap: 16 }}>
-      <div className="row" style={{ justifyContent: "flex-end" }}>
-        <a href="#financial-activity" className="button secondary" style={{ width: "auto" }}>
-          Hareketler ({paymentLogs.length})
-        </a>
-      </div>
+    <div className="grid defter-shell" style={{ gap: 16 }}>
       {info && (
         <div className="card" style={{ borderColor: "#fde68a", background: "#fffbeb" }}>
           <div className="row" style={{ justifyContent: "space-between" }}>
@@ -279,12 +292,15 @@ export function DefterClient(props: Props) {
             </p>
           )}
           {allTransfers.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <ul className="defter-net-list">
               {allTransfers.map((item, index) => (
-                <li key={`${item.from_id}-${item.to_id}-${index}`} style={{ marginBottom: 8 }}>
+                <li key={`${item.from_id}-${item.to_id}-${index}`} className="defter-net-item">
                   <div className="row defter-transfer-row" style={{ justifyContent: "space-between", alignItems: "center" }}>
-                    <span className="defter-transfer-text">
-                      <strong>{item.from_name}</strong> {"->"} <strong>{item.to_name}</strong>: {formatTRYRounded(item.amount)}
+                    <span className="defter-transfer-text defter-flow">
+                      <span className="defter-person">{item.from_name}</span>
+                      <span className="defter-flow-arrow">→</span>
+                      <span className="defter-person">{item.to_name}</span>
+                      <span className="defter-transfer-amount">{formatTRYRounded(item.amount)}</span>
                     </span>
                     {(() => {
                       const pairKey = `${item.from_id}::${item.to_id}`;
@@ -331,10 +347,15 @@ export function DefterClient(props: Props) {
         <div className="card">
           <h2 style={{ marginTop: 0 }}>Aylik Net</h2>
           {periodTransfers.length ? (
-            <ul style={{ margin: 0, paddingLeft: 18 }}>
+            <ul className="defter-net-list">
               {periodTransfers.map((item, index) => (
-                <li key={`${item.from_id}-${item.to_id}-${index}`}>
-                  <strong>{item.from_name}</strong> {"->"} <strong>{item.to_name}</strong>: {formatTRYRounded(item.amount)}
+                <li key={`${item.from_id}-${item.to_id}-${index}`} className="defter-net-item">
+                  <span className="defter-transfer-text defter-flow">
+                    <span className="defter-person">{item.from_name}</span>
+                    <span className="defter-flow-arrow">→</span>
+                    <span className="defter-person">{item.to_name}</span>
+                    <span className="defter-transfer-amount">{formatTRYRounded(item.amount)}</span>
+                  </span>
                 </li>
               ))}
             </ul>
@@ -354,9 +375,12 @@ export function DefterClient(props: Props) {
               return (
                 <li key={log.id} style={{ marginBottom: 10 }}>
                   <div className="grid" style={{ gap: 6 }}>
-                    <div>
-                      <strong>{log.from_name}</strong> {"->"} <strong>{log.to_name}</strong>:
-                      {" "}{formatTRYRounded(log.amount)} ({log.paid_at})
+                    <div className="defter-flow">
+                      <span className="defter-person">{log.from_name}</span>
+                      <span className="defter-flow-arrow">→</span>
+                      <span className="defter-person">{log.to_name}</span>
+                      <span className="defter-transfer-amount">{formatTRYRounded(log.amount)}</span>
+                      <span className="muted">({log.paid_at})</span>
                     </div>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {canConfirm
@@ -397,89 +421,14 @@ export function DefterClient(props: Props) {
         )}
       </div>
 
-      <div id="financial-activity" className="card" style={{ borderColor: "#dbeafe", background: "#f8fafc" }}>
-        <details>
-          <summary style={{ cursor: "pointer", fontWeight: 600 }}>
-            Hareketler
-            <span className="muted"> ({paymentLogs.length} kayit)</span>
-          </summary>
-          <p className="muted" style={{ marginTop: 8, marginBottom: 10 }}>
-            Odeme kapatma islemleri burada listelenir.
-          </p>
-          <div className="desktop-only">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Tarih</th>
-                  <th>Gonderen</th>
-                  <th>Alici</th>
-                  <th>Tutar</th>
-                  <th>Durum</th>
-                  <th>Onay Bilgisi</th>
-                  <th>Not</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paymentLogs.map((log) => (
-                  <tr key={log.id}>
-                    <td>{log.paid_at}</td>
-                    <td>{log.from_name}</td>
-                    <td>{log.to_name}</td>
-                    <td>{formatTRYRounded(log.amount)}</td>
-                    <td>
-                      {log.status === "confirmed" ? "Onaylandi" : log.status === "pending" ? "Beklemede" : "Reddedildi"}
-                    </td>
-                    <td>
-                      {log.status === "confirmed"
-                        ? `${log.confirmed_by_name ?? "Bilinmiyor"} (${log.confirmed_at ? new Date(log.confirmed_at).toLocaleString("tr-TR") : "-"})`
-                        : log.status === "pending"
-                          ? `Talep: ${log.requested_by_name ?? "Bilinmiyor"}`
-                          : `Islem: ${log.confirmed_by_name ?? "Bilinmiyor"}`}
-                    </td>
-                    <td>{log.note ?? "-"}</td>
-                  </tr>
-                ))}
-                {!paymentLogs.length && (
-                  <tr>
-                    <td colSpan={7} className="muted">Odeme kaydi yok.</td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-          <div className="mobile-only grid">
-            {paymentLogs.map((log) => (
-              <div key={log.id} className="mobile-card">
-                <p><strong>Tarih:</strong> {log.paid_at}</p>
-                <p><strong>Gonderen:</strong> {log.from_name}</p>
-                <p><strong>Alici:</strong> {log.to_name}</p>
-                <p><strong>Tutar:</strong> {formatTRYRounded(log.amount)}</p>
-                <p><strong>Durum:</strong> {log.status === "confirmed" ? "Onaylandi" : log.status === "pending" ? "Beklemede" : "Reddedildi"}</p>
-                <p>
-                  <strong>Onay Bilgisi:</strong>{" "}
-                  {log.status === "confirmed"
-                    ? `${log.confirmed_by_name ?? "Bilinmiyor"} (${log.confirmed_at ? new Date(log.confirmed_at).toLocaleString("tr-TR") : "-"})`
-                    : log.status === "pending"
-                      ? `Talep: ${log.requested_by_name ?? "Bilinmiyor"}`
-                      : `Islem: ${log.confirmed_by_name ?? "Bilinmiyor"}`}
-                </p>
-                <p><strong>Not:</strong> {log.note ?? "-"}</p>
-              </div>
-            ))}
-            {!paymentLogs.length && <p className="muted">Odeme kaydi yok.</p>}
-          </div>
-        </details>
-      </div>
-
-      <BalanceTable title="Genel Kisi Ozeti" rows={props.allBalances} />
-      <BalanceTable title="Aylik Kisi Ozeti" rows={props.periodBalances} />
-
       {draft && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(15, 23, 42, 0.45)", zIndex: 80, display: "grid", placeItems: "center", padding: 16 }}>
           <form className="card grid" style={{ width: "min(520px, 100%)" }} onSubmit={submitPayment}>
             <h3 style={{ margin: 0 }}>Odeme Kaydi</h3>
-            <p className="muted" style={{ margin: 0 }}>
-              {draft.from_name} {"->"} {draft.to_name}
+            <p className="muted defter-flow" style={{ margin: 0 }}>
+              <span className="defter-person">{draft.from_name}</span>
+              <span className="defter-flow-arrow">→</span>
+              <span className="defter-person">{draft.to_name}</span>
             </p>
             <p className="muted" style={{ margin: 0 }}>
               {draft.canDirectConfirm
@@ -512,58 +461,6 @@ export function DefterClient(props: Props) {
           </form>
         </div>
       )}
-    </div>
-  );
-}
-
-function BalanceTable({ title, rows }: { title: string; rows: PersonBalance[] }) {
-  return (
-    <div className="card">
-      <h2 style={{ marginTop: 0 }}>{title}</h2>
-      <div className="desktop-only">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Kisi</th>
-              <th>Odedigi</th>
-              <th>Payina Dusen</th>
-              <th>Net</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map((row) => (
-              <tr key={row.person_id}>
-                <td>{row.person_name}</td>
-                <td>{formatTRYRounded(row.paid)}</td>
-                <td>{formatTRYRounded(row.owed)}</td>
-                <td style={{ color: row.net >= 0 ? "#166534" : "#b91c1c" }}>
-                  {row.net >= 0 ? "+" : "-"}
-                  {formatTRYRounded(Math.abs(row.net))}
-                </td>
-              </tr>
-            ))}
-            {!rows.length && (
-              <tr>
-                <td colSpan={4} className="muted">Kayit yok.</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-      <div className="mobile-only grid">
-        {rows.map((row) => (
-          <div key={row.person_id} className="mobile-card">
-            <p><strong>Kisi:</strong> {row.person_name}</p>
-            <p><strong>Odedigi:</strong> {formatTRYRounded(row.paid)}</p>
-            <p><strong>Payina Dusen:</strong> {formatTRYRounded(row.owed)}</p>
-            <p style={{ color: row.net >= 0 ? "#166534" : "#b91c1c" }}>
-              <strong>Net:</strong> {row.net >= 0 ? "+" : "-"}
-              {formatTRYRounded(Math.abs(row.net))}
-            </p>
-          </div>
-        ))}
-        {!rows.length && <p className="muted">Kayit yok.</p>}
-      </div>
     </div>
   );
 }

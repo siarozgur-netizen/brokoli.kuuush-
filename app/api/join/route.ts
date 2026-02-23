@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
-import { getMembership } from "@/lib/team";
+import { setActiveTeamForUser } from "@/lib/team";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getDisplayName } from "@/lib/user-display";
 
@@ -8,11 +8,6 @@ export async function POST(request: Request) {
   try {
     const session = await requireApiUser();
     if ("error" in session) return session.error;
-
-    const membership = await getMembership(session.user.id);
-    if (membership) {
-      return NextResponse.json({ error: "Zaten bir takima uyelisiniz." }, { status: 400 });
-    }
 
     const body = await request.json();
     const code = String(body?.code ?? "").trim().toUpperCase();
@@ -59,7 +54,8 @@ export async function POST(request: Request) {
 
     if (insertError) {
       if (insertError.message?.toLowerCase().includes("duplicate")) {
-        return NextResponse.json({ error: "Bu takima zaten katilmissiniz." }, { status: 400 });
+        await setActiveTeamForUser(session.user.id, invite.team_id);
+        return NextResponse.json({ ok: true, warning: "Zaten uyesiniz." });
       }
       return NextResponse.json({ error: insertError.message }, { status: 400 });
     }
@@ -87,6 +83,7 @@ export async function POST(request: Request) {
       });
     }
 
+    await setActiveTeamForUser(session.user.id, invite.team_id);
     return NextResponse.json({ ok: true });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Bilinmeyen sunucu hatasi.";

@@ -1,7 +1,12 @@
 import Link from "next/link";
 import { CalendarClient } from "@/components/calendar/CalendarClient";
 import { formatTRY } from "@/lib/currency";
-import { applyPaymentsToTransfers, computeDirectTransfersFromPurchases, netPairTransfers } from "@/lib/settlement";
+import {
+  applyPaymentsToTransfers,
+  computeDirectTransfersFromPurchases,
+  netPairTransfers,
+  normalizePaymentsForCurrentDebts
+} from "@/lib/settlement";
 import { createClient } from "@/lib/supabase/server";
 import { requireMembership } from "@/lib/team";
 
@@ -20,13 +25,13 @@ export default async function HomePage() {
 
   const { data: purchases } = await supabase
     .from("purchases")
-    .select("id, date, total_amount, purchase_type, purchase_splits(person_id, percentage, amount, people(name))")
+    .select("id, date, total_amount, purchase_type, created_by, purchase_splits(person_id, percentage, amount, people(name))")
     .eq("team_id", membership.team_id)
     .order("date", { ascending: false });
 
   const { data: paymentRows } = await supabase
     .from("settlement_payments")
-    .select("from_person_id, to_person_id, amount, status")
+    .select("from_person_id, to_person_id, amount, status, confirmed_by_person_id")
     .eq("team_id", membership.team_id);
 
   const { data: meAsPerson } = await supabase
@@ -41,6 +46,7 @@ export default async function HomePage() {
     date: purchase.date,
     total_amount: Number(purchase.total_amount),
     purchase_type: (purchase.purchase_type === "munchies" ? "munchies" : "satin_alim") as "munchies" | "satin_alim",
+    created_by: purchase.created_by,
     splits: (purchase.purchase_splits ?? []).map((split) => ({
       // Supabase nested relation can be object or single-item array depending on typing inference.
       person_name: (() => {
@@ -53,9 +59,7 @@ export default async function HomePage() {
     }))
   }));
 
-  const transfers = netPairTransfers(
-    applyPaymentsToTransfers(
-    computeDirectTransfersFromPurchases(
+  const baseTransfers = computeDirectTransfersFromPurchases(
       normalizedPurchases.map((purchase) => ({
         id: purchase.id,
         total_amount: purchase.total_amount,
@@ -65,20 +69,21 @@ export default async function HomePage() {
           amount: split.amount
         }))
       }))
-    ),
-    (paymentRows ?? [])
-      .filter((payment) => payment.status === "confirmed")
-      .map((payment) => ({
-        from_person_id: payment.from_person_id,
-        to_person_id: payment.to_person_id,
-        amount: Number(payment.amount)
-      })),
-    Object.fromEntries(
-      normalizedPurchases
-        .flatMap((purchase) => purchase.splits)
-        .map((split) => [split.person_id, split.person_name])
-    )
-  ));
+    );
+  const confirmedPayments = (paymentRows ?? [])
+    .filter((payment) => payment.status === "confirmed" && payment.confirmed_by_person_id)
+    .map((payment) => ({
+      from_person_id: payment.from_person_id,
+      to_person_id: payment.to_person_id,
+      amount: Number(payment.amount)
+    }));
+  const normalizedPayments = normalizePaymentsForCurrentDebts(baseTransfers, confirmedPayments);
+  const nameMap = Object.fromEntries(
+    normalizedPurchases
+      .flatMap((purchase) => purchase.splits)
+      .map((split) => [split.person_id, split.person_name])
+  );
+  const transfers = netPairTransfers(applyPaymentsToTransfers(baseTransfers, normalizedPayments, nameMap));
 
   const myReceivables = meAsPerson ? transfers.filter((item) => item.to_id === meAsPerson.id) : [];
   const myDebts = meAsPerson ? transfers.filter((item) => item.from_id === meAsPerson.id) : [];
@@ -136,10 +141,11 @@ export default async function HomePage() {
         people={(people ?? []).map((person) => ({
           id: person.id,
           name: person.name,
-          is_active: person.is_active
-        }))}
+        is_active: person.is_active
+      }))}
         isAdmin={membership.role === "admin"}
         teamId={membership.team_id}
+        currentUserId={user.id}
       />
     </div>
   );

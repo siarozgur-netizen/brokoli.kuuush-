@@ -1,16 +1,11 @@
 import { NextResponse } from "next/server";
 import { requireApiUser } from "@/lib/api-auth";
-import { getMembership } from "@/lib/team";
+import { setActiveTeamForUser } from "@/lib/team";
 import { getDisplayName } from "@/lib/user-display";
 
 export async function POST(request: Request) {
   const session = await requireApiUser();
   if ("error" in session) return session.error;
-
-  const membership = await getMembership(session.user.id);
-  if (membership) {
-    return NextResponse.json({ error: "Zaten bir takima uyelik var." }, { status: 400 });
-  }
 
   const body = await request.json();
   const name = String(body?.name ?? "").trim();
@@ -57,6 +52,8 @@ export async function POST(request: Request) {
       warning: `Takim olustu ama kisi senkronu basarisiz: ${peopleError.message}`
     });
   }
+
+  await setActiveTeamForUser(session.user.id, team.id);
 
   return NextResponse.json({ ok: true });
 }
