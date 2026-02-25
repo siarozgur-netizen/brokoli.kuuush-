@@ -1,0 +1,12 @@
+<Window x:Class="OverlayTutorial.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="OverlayTutorial"
+        WindowStyle="None"
+        ResizeMode="NoResize"
+        ShowInTaskbar="False"
+        Topmost="True"
+        Background="#000000"
+        Opacity="1.0">
+    <Grid />
+</Window>
