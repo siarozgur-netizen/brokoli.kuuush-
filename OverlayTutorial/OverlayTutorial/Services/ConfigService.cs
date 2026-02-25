@@ -19,26 +19,26 @@ public sealed class ConfigService
         _configPath = Path.Combine(appDataPath, "OverlayTutorial", "config.json");
     }
 
-    public double LoadOpacityOrDefault(double defaultOpacity)
+    public OverlayConfig LoadOrDefault()
     {
         try
         {
             if (!File.Exists(_configPath))
             {
-                return defaultOpacity;
+                return new OverlayConfig();
             }
 
             var json = File.ReadAllText(_configPath);
             var config = JsonSerializer.Deserialize<OverlayConfig>(json);
-            return config?.Opacity ?? defaultOpacity;
+            return config ?? new OverlayConfig();
         }
         catch
         {
-            return defaultOpacity;
+            return new OverlayConfig();
         }
     }
 
-    public void SaveOpacity(double opacity)
+    public void Save(OverlayConfig config)
     {
         try
         {
@@ -47,11 +47,6 @@ public sealed class ConfigService
             {
                 Directory.CreateDirectory(directory);
             }
-
-            var config = new OverlayConfig
-            {
-                Opacity = opacity
-            };
 
             var json = JsonSerializer.Serialize(config, JsonOptions);
             File.WriteAllText(_configPath, json);

@@ -1,8 +1,11 @@
 using System.ComponentModel;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using Microsoft.Web.WebView2.Core;
 using OverlayTutorial.Interop;
+using OverlayTutorial.Models;
 using OverlayTutorial.Services;
 
 namespace OverlayTutorial;
@@ -18,13 +21,16 @@ public partial class MainWindow : Window
     private const double MaxOpacity = 1.00;
     private const double OpacityStep = 0.10;
     private const double DefaultOpacity = 1.00;
+    private const string DefaultWebUrl = "https://www.youtube.com";
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
     private GlobalHotkeyService? _globalHotkeyService;
     private OverlayWindowModeService? _overlayWindowModeService;
     private HwndSource? _hwndSource;
+    private OverlayConfig _overlayConfig = new();
     private bool _isInteractMode;
+    private bool _isWebViewInitialized;
     private double _currentOpacity = DefaultOpacity;
 
     public MainWindow()
@@ -35,9 +41,17 @@ public partial class MainWindow : Window
         Closed += OnClosed;
     }
 
-    private void OnLoaded(object sender, RoutedEventArgs e)
+    private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         _overlayLayoutService.ApplyLayout(this);
+        try
+        {
+            await InitializeWebViewAsync();
+        }
+        catch
+        {
+            // Keep overlay running even if WebView2 initialization fails.
+        }
     }
 
     private void OnSourceInitialized(object? sender, EventArgs e)
@@ -50,7 +64,9 @@ public partial class MainWindow : Window
         _overlayWindowModeService = new OverlayWindowModeService(handle);
         _globalHotkeyService = new GlobalHotkeyService(handle);
 
-        _currentOpacity = NormalizeOpacity(_configService.LoadOpacityOrDefault(DefaultOpacity));
+        _overlayConfig = _configService.LoadOrDefault();
+        _currentOpacity = NormalizeOpacity(_overlayConfig.Opacity);
+        _overlayConfig.Opacity = _currentOpacity;
         ApplyOpacity(_currentOpacity, persist: false);
 
         RegisterGlobalHotkeys();
@@ -65,6 +81,7 @@ public partial class MainWindow : Window
         }
 
         _globalHotkeyService?.Dispose();
+        OverlayWebView.NavigationCompleted -= OnWebViewNavigationCompleted;
     }
 
     private void RegisterGlobalHotkeys()
@@ -145,7 +162,8 @@ public partial class MainWindow : Window
 
         if (persist)
         {
-            _configService.SaveOpacity(normalized);
+            _overlayConfig.Opacity = normalized;
+            _configService.Save(_overlayConfig);
         }
 
         UpdateIndicatorText();
@@ -171,5 +189,60 @@ public partial class MainWindow : Window
         var mode = _isInteractMode ? "INTERACT" : "PASS";
         var percent = (int)Math.Round(_currentOpacity * 100, MidpointRounding.AwayFromZero);
         ModeIndicatorTextBlock.Text = $"{mode} {percent}%";
+    }
+
+    private async Task InitializeWebViewAsync()
+    {
+        if (_isWebViewInitialized)
+        {
+            return;
+        }
+
+        var userDataFolder = GetWebViewUserDataFolder();
+        Directory.CreateDirectory(userDataFolder);
+
+        var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
+        await OverlayWebView.EnsureCoreWebView2Async(environment);
+        OverlayWebView.NavigationCompleted += OnWebViewNavigationCompleted;
+
+        _isWebViewInitialized = true;
+
+        var startupUrl = GetStartupUrl(_overlayConfig.LastUrl);
+        OverlayWebView.Source = new Uri(startupUrl);
+    }
+
+    private void OnWebViewNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
+    {
+        _ = sender;
+
+        if (!e.IsSuccess || OverlayWebView.Source is null)
+        {
+            return;
+        }
+
+        _overlayConfig.LastUrl = OverlayWebView.Source.ToString();
+        _configService.Save(_overlayConfig);
+    }
+
+    private static string GetStartupUrl(string? lastUrl)
+    {
+        if (string.IsNullOrWhiteSpace(lastUrl))
+        {
+            return DefaultWebUrl;
+        }
+
+        if (Uri.TryCreate(lastUrl, UriKind.Absolute, out var uri) &&
+            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
+        {
+            return uri.ToString();
+        }
+
+        return DefaultWebUrl;
+    }
+
+    private static string GetWebViewUserDataFolder()
+    {
+        var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+        return Path.Combine(appDataPath, "OverlayTutorial", "WebViewProfile");
     }
 }
