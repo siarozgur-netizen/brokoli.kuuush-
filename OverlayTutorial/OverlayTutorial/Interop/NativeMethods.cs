@@ -13,6 +13,8 @@ internal static class NativeMethods
 
     internal const uint MOD_ALT = 0x0001;
     internal const uint MOD_CONTROL = 0x0002;
+    internal const uint VK_UP = 0x26;
+    internal const uint VK_DOWN = 0x28;
 
     internal static readonly IntPtr HWND_TOPMOST = new(-1);
 

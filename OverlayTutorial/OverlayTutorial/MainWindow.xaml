@@ -10,7 +10,7 @@
         Opacity="1.0">
     <Grid>
         <TextBlock x:Name="ModeIndicatorTextBlock"
-                   Text="PASS"
+                   Text="PASS 100%"
                    Foreground="White"
                    FontSize="12"
                    Margin="8"
