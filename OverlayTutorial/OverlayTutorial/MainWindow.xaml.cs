@@ -3,6 +3,7 @@ using System.IO;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using System.Windows.Input;
 using Microsoft.Web.WebView2.Core;
 using OverlayTutorial.Interop;
 using OverlayTutorial.Models;
@@ -16,12 +17,14 @@ public partial class MainWindow : Window
     private const int ToggleInteractHotkeyId = 2;
     private const int IncreaseOpacityHotkeyId = 3;
     private const int DecreaseOpacityHotkeyId = 4;
+    private const int FocusSearchHotkeyId = 5;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
     private const double OpacityStep = 0.10;
     private const double DefaultOpacity = 1.00;
     private const string DefaultWebUrl = "https://www.youtube.com";
+    private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -71,6 +74,7 @@ public partial class MainWindow : Window
 
         RegisterGlobalHotkeys();
         SetInteractMode(false);
+        UpdateSearchPlaceholderVisibility();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -111,6 +115,11 @@ public partial class MainWindow : Window
         if (!_globalHotkeyService.Register(DecreaseOpacityHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseOpacity))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Down hotkey.");
+        }
+
+        if (!_globalHotkeyService.Register(FocusSearchHotkeyId, modifiers, (uint)'F', FocusSearchBar))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+F hotkey.");
         }
     }
 
@@ -181,6 +190,7 @@ public partial class MainWindow : Window
 
         var isPassMode = !_isInteractMode;
         _overlayWindowModeService?.SetPassMode(isPassMode);
+        UpdateSearchInputAvailability();
         UpdateIndicatorText();
     }
 
@@ -244,5 +254,89 @@ public partial class MainWindow : Window
     {
         var appDataPath = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
         return Path.Combine(appDataPath, "OverlayTutorial", "WebViewProfile");
+    }
+
+    private void FocusSearchBar()
+    {
+        if (!_isInteractMode || !IsVisible)
+        {
+            return;
+        }
+
+        SearchTextBox.Focus();
+        SearchTextBox.SelectAll();
+    }
+
+    private void UpdateSearchInputAvailability()
+    {
+        var interactEnabled = _isInteractMode;
+        SearchBarContainer.IsHitTestVisible = interactEnabled;
+        SearchTextBox.IsHitTestVisible = interactEnabled;
+        SearchTextBox.IsEnabled = interactEnabled;
+        SearchTextBox.Focusable = interactEnabled;
+
+        if (!interactEnabled && SearchTextBox.IsKeyboardFocused)
+        {
+            Keyboard.ClearFocus();
+        }
+
+        UpdateSearchPlaceholderVisibility();
+    }
+
+    private void OnSearchTextBoxKeyDown(object sender, KeyEventArgs e)
+    {
+        _ = sender;
+
+        if (e.Key != Key.Enter || !_isInteractMode)
+        {
+            return;
+        }
+
+        var query = SearchTextBox.Text.Trim();
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return;
+        }
+
+        var encodedQuery = Uri.EscapeDataString(query);
+        var targetUrl = $"{YouTubeSearchUrlPrefix}{encodedQuery}";
+
+        if (OverlayWebView.CoreWebView2 is not null)
+        {
+            OverlayWebView.CoreWebView2.Navigate(targetUrl);
+        }
+        else
+        {
+            OverlayWebView.Source = new Uri(targetUrl);
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnSearchTextBoxTextChanged(object sender, System.Windows.Controls.TextChangedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        UpdateSearchPlaceholderVisibility();
+    }
+
+    private void OnSearchTextBoxGotFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        UpdateSearchPlaceholderVisibility();
+    }
+
+    private void OnSearchTextBoxLostFocus(object sender, RoutedEventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        UpdateSearchPlaceholderVisibility();
+    }
+
+    private void UpdateSearchPlaceholderVisibility()
+    {
+        var shouldShow = string.IsNullOrWhiteSpace(SearchTextBox.Text) && !SearchTextBox.IsKeyboardFocused;
+        SearchPlaceholderTextBlock.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
     }
 }
