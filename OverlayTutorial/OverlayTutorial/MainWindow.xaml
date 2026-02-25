@@ -8,5 +8,15 @@
         Topmost="True"
         Background="#000000"
         Opacity="1.0">
-    <Grid />
+    <Grid>
+        <TextBlock x:Name="ModeIndicatorTextBlock"
+                   Text="PASS"
+                   Foreground="White"
+                   FontSize="12"
+                   Margin="8"
+                   HorizontalAlignment="Left"
+                   VerticalAlignment="Top"
+                   IsHitTestVisible="False"
+                   Panel.ZIndex="1000" />
+    </Grid>
 </Window>
