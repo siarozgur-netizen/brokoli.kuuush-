@@ -9,7 +9,7 @@ on:
       - main
 
 jobs:
-  build-windows:
+  build:
     runs-on: windows-latest
 
     steps:
@@ -21,10 +21,8 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
-      - name: Restore
-        working-directory: OverlayTutorial
-        run: dotnet restore
+      - name: Restore dependencies
+        run: dotnet restore OverlayTutorial/OverlayTutorial.sln
 
-      - name: Build (Release)
-        working-directory: OverlayTutorial
-        run: dotnet build -c Release --no-restore
+      - name: Build
+        run: dotnet build OverlayTutorial/OverlayTutorial.sln -c Release --no-restore
