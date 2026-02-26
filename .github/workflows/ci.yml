@@ -4,6 +4,8 @@ on:
   push:
     branches:
       - main
+    tags:
+      - "v*"
   pull_request:
     branches:
       - main
@@ -11,6 +13,9 @@ on:
 jobs:
   build:
     runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: OverlayTutorial
 
     steps:
       - name: Checkout repository
@@ -22,7 +27,42 @@ jobs:
           dotnet-version: 8.0.x
 
       - name: Restore dependencies
-        run: dotnet restore OverlayTutorial/OverlayTutorial.sln
+        run: dotnet restore OverlayTutorial.sln
 
       - name: Build
-        run: dotnet build OverlayTutorial/OverlayTutorial.sln -c Release --no-restore
+        run: dotnet build OverlayTutorial.sln -c Release --no-restore
+
+  package-windows:
+    runs-on: windows-latest
+    if: github.event_name == 'push'
+    defaults:
+      run:
+        working-directory: OverlayTutorial
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Restore dependencies
+        run: dotnet restore OverlayTutorial.sln
+
+      - name: Build
+        run: dotnet build OverlayTutorial.sln -c Release --no-restore
+
+      - name: Publish app output
+        run: dotnet publish OverlayTutorial/OverlayTutorial.csproj -c Release -r win-x64 --self-contained false -o out/win-x64
+
+      - name: Create zip artifact
+        shell: pwsh
+        run: Compress-Archive -Path out/win-x64/* -DestinationPath OverlayTutorial-win-x64.zip -Force
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: OverlayTutorial-win-x64
+          path: OverlayTutorial/OverlayTutorial-win-x64.zip
