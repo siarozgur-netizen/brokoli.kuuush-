@@ -14,13 +14,14 @@ public sealed class OverlayWindowModeService
 
     public void SetPassMode(bool passModeEnabled)
     {
-        ApplyTransparentStyle(_windowHandle, passModeEnabled);
+        ApplyTransparentStyle(_windowHandle, passModeEnabled, includeLayeredStyle: true);
 
         _ = NativeMethods.EnumChildWindows(
             _windowHandle,
             (childHandle, _) =>
             {
-                ApplyTransparentStyle(childHandle, passModeEnabled);
+                // Applying WS_EX_LAYERED on WebView child windows can cause black rendering.
+                ApplyTransparentStyle(childHandle, passModeEnabled, includeLayeredStyle: false);
                 return true;
             },
             IntPtr.Zero);
@@ -41,12 +42,15 @@ public sealed class OverlayWindowModeService
             NativeMethods.SWP_SHOWWINDOW);
     }
 
-    private static void ApplyTransparentStyle(IntPtr handle, bool passModeEnabled)
+    private static void ApplyTransparentStyle(IntPtr handle, bool passModeEnabled, bool includeLayeredStyle)
     {
         var currentStyles = NativeMethods.GetWindowLongPtr(handle, NativeMethods.GWL_EXSTYLE).ToInt64();
         var updatedStyles = (uint)currentStyles;
 
-        updatedStyles |= NativeMethods.WS_EX_LAYERED;
+        if (includeLayeredStyle)
+        {
+            updatedStyles |= NativeMethods.WS_EX_LAYERED;
+        }
 
         if (passModeEnabled)
         {

@@ -57,6 +57,7 @@
                    Margin="12,8,0,0"
                    HorizontalAlignment="Left"
                    VerticalAlignment="Top"
+                   Visibility="Collapsed"
                    IsHitTestVisible="False"
                     Panel.ZIndex="1000" />
     </Grid>

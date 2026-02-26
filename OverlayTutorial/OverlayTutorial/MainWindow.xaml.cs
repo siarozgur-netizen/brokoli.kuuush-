@@ -5,6 +5,7 @@ using System.Windows.Media.Animation;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Input;
+using System.Windows.Threading;
 using Microsoft.Web.WebView2.Core;
 using OverlayTutorial.Interop;
 using OverlayTutorial.Models;
@@ -33,6 +34,7 @@ public partial class MainWindow : Window
     private const double DefaultOpacity = 1.00;
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
     private const int LayoutAnimationMilliseconds = 160;
+    private const int IndicatorVisibleMilliseconds = 1200;
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -44,6 +46,7 @@ public partial class MainWindow : Window
     private bool _isWebViewInitialized;
     private double _currentOpacity = DefaultOpacity;
     private OverlayLayoutMode _layoutMode = OverlayLayoutMode.Search;
+    private readonly DispatcherTimer _indicatorHideTimer = new();
 
     public MainWindow()
     {
@@ -51,11 +54,14 @@ public partial class MainWindow : Window
         Loaded += OnLoaded;
         SourceInitialized += OnSourceInitialized;
         Closed += OnClosed;
+
+        _indicatorHideTimer.Interval = TimeSpan.FromMilliseconds(IndicatorVisibleMilliseconds);
+        _indicatorHideTimer.Tick += OnIndicatorHideTimerTick;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        ApplyLayoutMode(GetInitialLayoutMode(), animate: false);
+        ApplyLayoutMode(GetInitialLayoutMode(), animate: false, showIndicator: false);
         try
         {
             await InitializeWebViewAsync();
@@ -83,8 +89,8 @@ public partial class MainWindow : Window
         _layoutMode = ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
 
         RegisterGlobalHotkeys();
-        SetInteractMode(_layoutMode == OverlayLayoutMode.Search);
-        ApplyLayoutMode(_layoutMode, animate: false);
+        SetInteractMode(_layoutMode == OverlayLayoutMode.Search, showIndicator: false);
+        ApplyLayoutMode(_layoutMode, animate: false, showIndicator: false);
         UpdateSearchPlaceholderVisibility();
     }
 
@@ -98,6 +104,7 @@ public partial class MainWindow : Window
         _globalHotkeyService?.Dispose();
         OverlayWebView.NavigationCompleted -= OnWebViewNavigationCompleted;
         OverlayWebView.NavigationStarting -= OnWebViewNavigationStarting;
+        _indicatorHideTimer.Tick -= OnIndicatorHideTimerTick;
     }
 
     private void RegisterGlobalHotkeys()
@@ -167,23 +174,27 @@ public partial class MainWindow : Window
 
     private void ToggleInteractMode()
     {
-        SetInteractMode(!_isInteractMode);
+        // Search mode must always be interactive; normal mode must stay pass-through.
+        if (_layoutMode == OverlayLayoutMode.Search)
+        {
+            SetInteractMode(true, showIndicator: true);
+        }
+        else
+        {
+            SetInteractMode(false, showIndicator: true);
+        }
     }
 
     private void ToggleSearchMode()
     {
         if (_layoutMode == OverlayLayoutMode.Search)
         {
-            ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true);
+            ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true);
             return;
         }
 
-        SetInteractMode(true);
-        ApplyLayoutMode(OverlayLayoutMode.Search, animate: true);
-        if (OverlayWebView.Source is not null && IsVideoUrl(OverlayWebView.Source.ToString()))
-        {
-            NavigateToSearchHome();
-        }
+        ApplyLayoutMode(OverlayLayoutMode.Search, animate: true, showIndicator: true);
+        NavigateToSearchHome();
         FocusSearchBar();
     }
 
@@ -218,7 +229,7 @@ public partial class MainWindow : Window
         return Math.Clamp(rounded, MinOpacity, MaxOpacity);
     }
 
-    private void SetInteractMode(bool interactModeEnabled)
+    private void SetInteractMode(bool interactModeEnabled, bool showIndicator = false)
     {
         _isInteractMode = interactModeEnabled;
 
@@ -226,6 +237,11 @@ public partial class MainWindow : Window
         _overlayWindowModeService?.SetPassMode(isPassMode);
         UpdateSearchInputAvailability();
         UpdateIndicatorText();
+
+        if (showIndicator)
+        {
+            ShowModeIndicatorTemporarily();
+        }
     }
 
     private void UpdateIndicatorText()
@@ -275,7 +291,7 @@ public partial class MainWindow : Window
 
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(e.Uri))
         {
-            Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true));
+            Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true));
         }
     }
 
@@ -388,7 +404,7 @@ public partial class MainWindow : Window
         SearchPlaceholderTextBlock.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private void ApplyLayoutMode(OverlayLayoutMode mode, bool animate)
+    private void ApplyLayoutMode(OverlayLayoutMode mode, bool animate, bool showIndicator = true)
     {
         _layoutMode = mode;
         _overlayConfig.PreferredLayoutMode = mode.ToString();
@@ -405,7 +421,6 @@ public partial class MainWindow : Window
         var isSearchMode = mode == OverlayLayoutMode.Search;
         SearchRowDefinition.Height = new GridLength(isSearchMode ? 36 : 0);
         SearchBarContainer.Visibility = isSearchMode ? Visibility.Visible : Visibility.Collapsed;
-        ModeIndicatorTextBlock.Visibility = isSearchMode ? Visibility.Visible : Visibility.Collapsed;
 
         if (animate)
         {
@@ -421,11 +436,11 @@ public partial class MainWindow : Window
 
         if (!isSearchMode)
         {
-            SetInteractMode(false);
+            SetInteractMode(false, showIndicator);
         }
         else
         {
-            SetInteractMode(true);
+            SetInteractMode(true, showIndicator);
         }
     }
 
@@ -474,5 +489,19 @@ public partial class MainWindow : Window
     private OverlayLayoutMode GetInitialLayoutMode()
     {
         return ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
+    }
+
+    private void ShowModeIndicatorTemporarily()
+    {
+        ModeIndicatorTextBlock.Visibility = Visibility.Visible;
+        _indicatorHideTimer.Stop();
+        _indicatorHideTimer.Start();
+    }
+
+    private void OnIndicatorHideTimerTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _indicatorHideTimer.Stop();
+        ModeIndicatorTextBlock.Visibility = Visibility.Collapsed;
     }
 }
