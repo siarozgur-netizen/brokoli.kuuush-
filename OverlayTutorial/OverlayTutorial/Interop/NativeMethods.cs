@@ -41,6 +41,9 @@ internal static class NativeMethods
         int cy,
         uint uFlags);
 
+    [DllImport("user32.dll")]
+    internal static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
 
@@ -66,4 +69,6 @@ internal static class NativeMethods
             ? SetWindowLongPtr64(hWnd, nIndex, newLong)
             : new IntPtr(SetWindowLong32(hWnd, nIndex, newLong.ToInt32()));
     }
+
+    internal delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
 }

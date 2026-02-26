@@ -4,18 +4,36 @@ namespace OverlayTutorial.Services;
 
 public sealed class OverlayLayoutService
 {
-    private const double WidthRatio = 0.20;
-    private const double AspectRatioWidth = 16.0;
-    private const double AspectRatioHeight = 9.0;
+    private const double NormalWidthRatio = 0.26;
+    private const double NormalAspectRatioWidth = 16.0;
+    private const double NormalAspectRatioHeight = 9.0;
+    private const double SearchWidthRatio = 0.18;
+    private const double SearchAspectRatioWidth = 9.0;
+    private const double SearchAspectRatioHeight = 16.0;
     private const double HorizontalMarginRatio = 0.03;
     private const double VerticalMarginRatio = 0.03;
 
-    public Size CalculateSize(double primaryScreenWidth, double primaryScreenHeight)
+    public Size CalculateNormalSize(double primaryScreenWidth, double primaryScreenHeight)
     {
         _ = primaryScreenHeight;
 
-        var width = primaryScreenWidth * WidthRatio;
-        var height = width * (AspectRatioHeight / AspectRatioWidth);
+        var width = primaryScreenWidth * NormalWidthRatio;
+        var height = width * (NormalAspectRatioHeight / NormalAspectRatioWidth);
+
+        return new Size(width, height);
+    }
+
+    public Size CalculateSearchSize(double primaryScreenWidth, double primaryScreenHeight)
+    {
+        var width = primaryScreenWidth * SearchWidthRatio;
+        var height = width * (SearchAspectRatioHeight / SearchAspectRatioWidth);
+
+        var maxHeight = primaryScreenHeight - (primaryScreenHeight * VerticalMarginRatio * 2);
+        if (height > maxHeight)
+        {
+            height = maxHeight;
+            width = height * (SearchAspectRatioWidth / SearchAspectRatioHeight);
+        }
 
         return new Size(width, height);
     }
@@ -39,7 +57,7 @@ public sealed class OverlayLayoutService
         var primaryScreenWidth = SystemParameters.PrimaryScreenWidth;
         var primaryScreenHeight = SystemParameters.PrimaryScreenHeight;
 
-        var size = CalculateSize(primaryScreenWidth, primaryScreenHeight);
+        var size = CalculateNormalSize(primaryScreenWidth, primaryScreenHeight);
         var position = CalculatePosition(primaryScreenWidth, primaryScreenHeight, size);
 
         window.Width = size.Width;

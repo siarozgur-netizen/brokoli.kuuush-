@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Windows.Media.Animation;
 using System.Windows;
 using System.Windows.Interop;
 using System.Windows.Input;
@@ -13,18 +14,25 @@ namespace OverlayTutorial;
 
 public partial class MainWindow : Window
 {
+    private enum OverlayLayoutMode
+    {
+        Normal = 0,
+        Search = 1
+    }
+
     private const int ToggleVisibilityHotkeyId = 1;
     private const int ToggleInteractHotkeyId = 2;
     private const int IncreaseOpacityHotkeyId = 3;
     private const int DecreaseOpacityHotkeyId = 4;
     private const int FocusSearchHotkeyId = 5;
+    private const int ToggleSearchModeHotkeyId = 6;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
     private const double OpacityStep = 0.10;
     private const double DefaultOpacity = 1.00;
-    private const string DefaultWebUrl = "https://www.youtube.com";
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
+    private const int LayoutAnimationMilliseconds = 160;
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -35,6 +43,7 @@ public partial class MainWindow : Window
     private bool _isInteractMode;
     private bool _isWebViewInitialized;
     private double _currentOpacity = DefaultOpacity;
+    private OverlayLayoutMode _layoutMode = OverlayLayoutMode.Search;
 
     public MainWindow()
     {
@@ -46,7 +55,7 @@ public partial class MainWindow : Window
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _overlayLayoutService.ApplyLayout(this);
+        ApplyLayoutMode(GetInitialLayoutMode(), animate: false);
         try
         {
             await InitializeWebViewAsync();
@@ -71,9 +80,11 @@ public partial class MainWindow : Window
         _currentOpacity = NormalizeOpacity(_overlayConfig.Opacity);
         _overlayConfig.Opacity = _currentOpacity;
         ApplyOpacity(_currentOpacity, persist: false);
+        _layoutMode = ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
 
         RegisterGlobalHotkeys();
-        SetInteractMode(false);
+        SetInteractMode(_layoutMode == OverlayLayoutMode.Search);
+        ApplyLayoutMode(_layoutMode, animate: false);
         UpdateSearchPlaceholderVisibility();
     }
 
@@ -86,6 +97,7 @@ public partial class MainWindow : Window
 
         _globalHotkeyService?.Dispose();
         OverlayWebView.NavigationCompleted -= OnWebViewNavigationCompleted;
+        OverlayWebView.NavigationStarting -= OnWebViewNavigationStarting;
     }
 
     private void RegisterGlobalHotkeys()
@@ -121,6 +133,11 @@ public partial class MainWindow : Window
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+F hotkey.");
         }
+
+        if (!_globalHotkeyService.Register(ToggleSearchModeHotkeyId, modifiers, (uint)'S', ToggleSearchMode))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+S hotkey.");
+        }
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -151,6 +168,23 @@ public partial class MainWindow : Window
     private void ToggleInteractMode()
     {
         SetInteractMode(!_isInteractMode);
+    }
+
+    private void ToggleSearchMode()
+    {
+        if (_layoutMode == OverlayLayoutMode.Search)
+        {
+            ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true);
+            return;
+        }
+
+        SetInteractMode(true);
+        ApplyLayoutMode(OverlayLayoutMode.Search, animate: true);
+        if (OverlayWebView.Source is not null && IsVideoUrl(OverlayWebView.Source.ToString()))
+        {
+            NavigateToSearchHome();
+        }
+        FocusSearchBar();
     }
 
     private void IncreaseOpacity()
@@ -214,6 +248,7 @@ public partial class MainWindow : Window
         var environment = await CoreWebView2Environment.CreateAsync(userDataFolder: userDataFolder);
         await OverlayWebView.EnsureCoreWebView2Async(environment);
         OverlayWebView.NavigationCompleted += OnWebViewNavigationCompleted;
+        OverlayWebView.NavigationStarting += OnWebViewNavigationStarting;
 
         _isWebViewInitialized = true;
 
@@ -234,11 +269,21 @@ public partial class MainWindow : Window
         _configService.Save(_overlayConfig);
     }
 
+    private void OnWebViewNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+    {
+        _ = sender;
+
+        if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(e.Uri))
+        {
+            Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true));
+        }
+    }
+
     private static string GetStartupUrl(string? lastUrl)
     {
         if (string.IsNullOrWhiteSpace(lastUrl))
         {
-            return DefaultWebUrl;
+            return $"{YouTubeSearchUrlPrefix}";
         }
 
         if (Uri.TryCreate(lastUrl, UriKind.Absolute, out var uri) &&
@@ -247,7 +292,7 @@ public partial class MainWindow : Window
             return uri.ToString();
         }
 
-        return DefaultWebUrl;
+        return $"{YouTubeSearchUrlPrefix}";
     }
 
     private static string GetWebViewUserDataFolder()
@@ -258,7 +303,7 @@ public partial class MainWindow : Window
 
     private void FocusSearchBar()
     {
-        if (!_isInteractMode || !IsVisible)
+        if (!_isInteractMode || !IsVisible || _layoutMode != OverlayLayoutMode.Search)
         {
             return;
         }
@@ -270,10 +315,13 @@ public partial class MainWindow : Window
     private void UpdateSearchInputAvailability()
     {
         var interactEnabled = _isInteractMode;
-        SearchBarContainer.IsHitTestVisible = interactEnabled;
-        SearchTextBox.IsHitTestVisible = interactEnabled;
-        SearchTextBox.IsEnabled = interactEnabled;
-        SearchTextBox.Focusable = interactEnabled;
+        var searchAvailable = interactEnabled && _layoutMode == OverlayLayoutMode.Search;
+
+        OverlayWebView.IsHitTestVisible = interactEnabled;
+        SearchBarContainer.IsHitTestVisible = searchAvailable;
+        SearchTextBox.IsHitTestVisible = searchAvailable;
+        SearchTextBox.IsEnabled = searchAvailable;
+        SearchTextBox.Focusable = searchAvailable;
 
         if (!interactEnabled && SearchTextBox.IsKeyboardFocused)
         {
@@ -338,5 +386,93 @@ public partial class MainWindow : Window
     {
         var shouldShow = string.IsNullOrWhiteSpace(SearchTextBox.Text) && !SearchTextBox.IsKeyboardFocused;
         SearchPlaceholderTextBlock.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ApplyLayoutMode(OverlayLayoutMode mode, bool animate)
+    {
+        _layoutMode = mode;
+        _overlayConfig.PreferredLayoutMode = mode.ToString();
+        _configService.Save(_overlayConfig);
+
+        var screenWidth = SystemParameters.PrimaryScreenWidth;
+        var screenHeight = SystemParameters.PrimaryScreenHeight;
+
+        var size = mode == OverlayLayoutMode.Search
+            ? _overlayLayoutService.CalculateSearchSize(screenWidth, screenHeight)
+            : _overlayLayoutService.CalculateNormalSize(screenWidth, screenHeight);
+        var position = _overlayLayoutService.CalculatePosition(screenWidth, screenHeight, size);
+
+        var isSearchMode = mode == OverlayLayoutMode.Search;
+        SearchRowDefinition.Height = new GridLength(isSearchMode ? 36 : 0);
+        SearchBarContainer.Visibility = isSearchMode ? Visibility.Visible : Visibility.Collapsed;
+        ModeIndicatorTextBlock.Visibility = isSearchMode ? Visibility.Visible : Visibility.Collapsed;
+
+        if (animate)
+        {
+            AnimateWindowLayout(position.X, position.Y, size.Width, size.Height);
+        }
+        else
+        {
+            Left = position.X;
+            Top = position.Y;
+            Width = size.Width;
+            Height = size.Height;
+        }
+
+        if (!isSearchMode)
+        {
+            SetInteractMode(false);
+        }
+        else
+        {
+            SetInteractMode(true);
+        }
+    }
+
+    private void AnimateWindowLayout(double targetLeft, double targetTop, double targetWidth, double targetHeight)
+    {
+        var duration = TimeSpan.FromMilliseconds(LayoutAnimationMilliseconds);
+        var easing = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+
+        BeginAnimation(LeftProperty, new DoubleAnimation(targetLeft, duration) { EasingFunction = easing });
+        BeginAnimation(TopProperty, new DoubleAnimation(targetTop, duration) { EasingFunction = easing });
+        BeginAnimation(WidthProperty, new DoubleAnimation(targetWidth, duration) { EasingFunction = easing });
+        BeginAnimation(HeightProperty, new DoubleAnimation(targetHeight, duration) { EasingFunction = easing });
+    }
+
+    private static OverlayLayoutMode ParseLayoutMode(string? modeValue)
+    {
+        return Enum.TryParse<OverlayLayoutMode>(modeValue, ignoreCase: true, out var parsedMode)
+            ? parsedMode
+            : OverlayLayoutMode.Search;
+    }
+
+    private static bool IsVideoUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return false;
+        }
+
+        return url.Contains("youtube.com/watch", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("youtube.com/shorts", StringComparison.OrdinalIgnoreCase) ||
+               url.Contains("youtu.be/", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private void NavigateToSearchHome()
+    {
+        if (OverlayWebView.CoreWebView2 is not null)
+        {
+            OverlayWebView.CoreWebView2.Navigate($"{YouTubeSearchUrlPrefix}");
+        }
+        else
+        {
+            OverlayWebView.Source = new Uri($"{YouTubeSearchUrlPrefix}");
+        }
+    }
+
+    private OverlayLayoutMode GetInitialLayoutMode()
+    {
+        return ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
     }
 }
