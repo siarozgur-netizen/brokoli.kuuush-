@@ -8,8 +8,17 @@
         ShowInTaskbar="False"
         Topmost="True"
         Background="#000000"
-        Opacity="1.0">
+        Opacity="1.0"
+        PreviewKeyDown="OnWindowPreviewKeyDown"
+        PreviewKeyUp="OnWindowPreviewKeyUp">
     <Grid>
+        <Border BorderBrush="#24FFFFFF"
+                BorderThickness="1"
+                CornerRadius="6"
+                Margin="1"
+                IsHitTestVisible="False"
+                Panel.ZIndex="900" />
+
         <Grid.RowDefinitions>
             <RowDefinition x:Name="SearchRowDefinition" Height="36" />
             <RowDefinition Height="*" />
@@ -42,6 +51,15 @@
                            Margin="12,0,0,0"
                            VerticalAlignment="Center"
                            IsHitTestVisible="False" />
+                <ProgressBar x:Name="NavigationProgressBar"
+                             Height="2"
+                             VerticalAlignment="Top"
+                             Margin="4,1,4,0"
+                             IsIndeterminate="True"
+                             Visibility="Collapsed"
+                             Foreground="#66C7FF"
+                             Background="#00000000"
+                             IsHitTestVisible="False" />
             </Grid>
         </Border>
 
@@ -54,11 +72,22 @@
                    Text="PASS 100%"
                    Foreground="White"
                    FontSize="12"
-                   Margin="12,8,0,0"
-                   HorizontalAlignment="Left"
+                   Margin="0,8,12,0"
+                   HorizontalAlignment="Right"
                    VerticalAlignment="Top"
                    Visibility="Collapsed"
                    IsHitTestVisible="False"
-                    Panel.ZIndex="1000" />
+                   Panel.ZIndex="1000" />
+
+        <TextBlock x:Name="HotkeyHintTextBlock"
+                   Text="O show/hide • I interact • S search • F focus • Q quit"
+                   Foreground="#E6FFFFFF"
+                   FontSize="11"
+                   Margin="10,0,10,10"
+                   HorizontalAlignment="Center"
+                   VerticalAlignment="Bottom"
+                   Visibility="Collapsed"
+                   IsHitTestVisible="False"
+                   Panel.ZIndex="1000" />
     </Grid>
 </Window>

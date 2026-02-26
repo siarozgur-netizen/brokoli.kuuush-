@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.IO;
+using System.Media;
 using System.Runtime.InteropServices;
 using System.Windows.Media.Animation;
 using System.Windows;
@@ -27,6 +28,7 @@ public partial class MainWindow : Window
     private const int DecreaseOpacityHotkeyId = 4;
     private const int FocusSearchHotkeyId = 5;
     private const int ToggleSearchModeHotkeyId = 6;
+    private const int ExitAppHotkeyId = 7;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
@@ -35,6 +37,8 @@ public partial class MainWindow : Window
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
     private const int LayoutAnimationMilliseconds = 160;
     private const int IndicatorVisibleMilliseconds = 1200;
+    private const int HotkeyHintVisibleMilliseconds = 3000;
+    private const bool EnableAudioFeedback = true;
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -47,6 +51,7 @@ public partial class MainWindow : Window
     private double _currentOpacity = DefaultOpacity;
     private OverlayLayoutMode _layoutMode = OverlayLayoutMode.Search;
     private readonly DispatcherTimer _indicatorHideTimer = new();
+    private readonly DispatcherTimer _hotkeyHintHideTimer = new();
 
     public MainWindow()
     {
@@ -57,6 +62,8 @@ public partial class MainWindow : Window
 
         _indicatorHideTimer.Interval = TimeSpan.FromMilliseconds(IndicatorVisibleMilliseconds);
         _indicatorHideTimer.Tick += OnIndicatorHideTimerTick;
+        _hotkeyHintHideTimer.Interval = TimeSpan.FromMilliseconds(HotkeyHintVisibleMilliseconds);
+        _hotkeyHintHideTimer.Tick += OnHotkeyHintHideTimerTick;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -92,6 +99,7 @@ public partial class MainWindow : Window
         SetInteractMode(_layoutMode == OverlayLayoutMode.Search, showIndicator: false);
         ApplyLayoutMode(_layoutMode, animate: false, showIndicator: false);
         UpdateSearchPlaceholderVisibility();
+        ShowHotkeyHintIfNeeded();
     }
 
     private void OnClosed(object? sender, EventArgs e)
@@ -104,7 +112,12 @@ public partial class MainWindow : Window
         _globalHotkeyService?.Dispose();
         OverlayWebView.NavigationCompleted -= OnWebViewNavigationCompleted;
         OverlayWebView.NavigationStarting -= OnWebViewNavigationStarting;
+        if (OverlayWebView.CoreWebView2 is not null)
+        {
+            OverlayWebView.CoreWebView2.AcceleratorKeyPressed -= OnWebViewAcceleratorKeyPressed;
+        }
         _indicatorHideTimer.Tick -= OnIndicatorHideTimerTick;
+        _hotkeyHintHideTimer.Tick -= OnHotkeyHintHideTimerTick;
     }
 
     private void RegisterGlobalHotkeys()
@@ -145,6 +158,11 @@ public partial class MainWindow : Window
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+S hotkey.");
         }
+
+        if (!_globalHotkeyService.Register(ExitAppHotkeyId, modifiers, (uint)'Q', ExitApplication))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Q hotkey.");
+        }
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -164,25 +182,20 @@ public partial class MainWindow : Window
     {
         if (IsVisible)
         {
+            PlayFeedbackTone();
             Hide();
             return;
         }
 
         Show();
         _overlayWindowModeService?.EnsureTopmost();
+        ShowHotkeyFeedback("VISIBLE");
+        PlayFeedbackTone();
     }
 
     private void ToggleInteractMode()
     {
-        // Search mode must always be interactive; normal mode must stay pass-through.
-        if (_layoutMode == OverlayLayoutMode.Search)
-        {
-            SetInteractMode(true, showIndicator: true);
-        }
-        else
-        {
-            SetInteractMode(false, showIndicator: true);
-        }
+        SetInteractMode(!_isInteractMode, showIndicator: true);
     }
 
     private void ToggleSearchMode()
@@ -190,22 +203,34 @@ public partial class MainWindow : Window
         if (_layoutMode == OverlayLayoutMode.Search)
         {
             ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true);
+            ShowHotkeyFeedback("THEATER MODE");
+            PlayFeedbackTone();
             return;
         }
 
         ApplyLayoutMode(OverlayLayoutMode.Search, animate: true, showIndicator: true);
         NavigateToSearchHome();
         FocusSearchBar();
+        ShowHotkeyFeedback("SEARCH MODE");
+        PlayFeedbackTone();
+    }
+
+    private void ExitApplication()
+    {
+        PlayFeedbackTone();
+        Close();
     }
 
     private void IncreaseOpacity()
     {
         ApplyOpacity(_currentOpacity + OpacityStep, persist: true);
+        ShowHotkeyFeedback($"OPACITY {(int)Math.Round(_currentOpacity * 100, MidpointRounding.AwayFromZero)}%");
     }
 
     private void DecreaseOpacity()
     {
         ApplyOpacity(_currentOpacity - OpacityStep, persist: true);
+        ShowHotkeyFeedback($"OPACITY {(int)Math.Round(_currentOpacity * 100, MidpointRounding.AwayFromZero)}%");
     }
 
     private void ApplyOpacity(double value, bool persist)
@@ -241,6 +266,7 @@ public partial class MainWindow : Window
         if (showIndicator)
         {
             ShowModeIndicatorTemporarily();
+            PlayFeedbackTone();
         }
     }
 
@@ -265,6 +291,7 @@ public partial class MainWindow : Window
         await OverlayWebView.EnsureCoreWebView2Async(environment);
         OverlayWebView.NavigationCompleted += OnWebViewNavigationCompleted;
         OverlayWebView.NavigationStarting += OnWebViewNavigationStarting;
+        OverlayWebView.CoreWebView2.AcceleratorKeyPressed += OnWebViewAcceleratorKeyPressed;
 
         _isWebViewInitialized = true;
 
@@ -275,6 +302,7 @@ public partial class MainWindow : Window
     private void OnWebViewNavigationCompleted(object? sender, CoreWebView2NavigationCompletedEventArgs e)
     {
         _ = sender;
+        SetNavigationLoading(isLoading: false);
 
         if (!e.IsSuccess || OverlayWebView.Source is null)
         {
@@ -288,10 +316,31 @@ public partial class MainWindow : Window
     private void OnWebViewNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
     {
         _ = sender;
+        SetNavigationLoading(isLoading: true);
 
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(e.Uri))
         {
             Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true));
+        }
+    }
+
+    private void OnWebViewAcceleratorKeyPressed(object? sender, CoreWebView2AcceleratorKeyPressedEventArgs e)
+    {
+        _ = sender;
+
+        if (e.VirtualKey != 0x1B)
+        {
+            return;
+        }
+
+        // Fully consume ESC in WebView so YouTube fullscreen doesn't process it.
+        e.Handled = true;
+
+        var isEscapeDown = e.KeyEventKind == CoreWebView2KeyEventKind.KeyDown ||
+                           e.KeyEventKind == CoreWebView2KeyEventKind.SystemKeyDown;
+        if (_isInteractMode && isEscapeDown)
+        {
+            Dispatcher.Invoke(() => SetInteractMode(false, showIndicator: true));
         }
     }
 
@@ -351,7 +400,8 @@ public partial class MainWindow : Window
     {
         _ = sender;
 
-        if (e.Key != Key.Enter || !_isInteractMode)
+        var isSubmitKey = e.Key == Key.Enter || e.Key == Key.Return;
+        if (!isSubmitKey || !_isInteractMode)
         {
             return;
         }
@@ -398,6 +448,33 @@ public partial class MainWindow : Window
         UpdateSearchPlaceholderVisibility();
     }
 
+    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
+    {
+        _ = sender;
+
+        if (e.Key != Key.Escape)
+        {
+            return;
+        }
+
+        if (_isInteractMode)
+        {
+            SetInteractMode(false, showIndicator: true);
+        }
+
+        e.Handled = true;
+    }
+
+    private void OnWindowPreviewKeyUp(object sender, KeyEventArgs e)
+    {
+        _ = sender;
+
+        if (e.Key == Key.Escape)
+        {
+            e.Handled = true;
+        }
+    }
+
     private void UpdateSearchPlaceholderVisibility()
     {
         var shouldShow = string.IsNullOrWhiteSpace(SearchTextBox.Text) && !SearchTextBox.IsKeyboardFocused;
@@ -421,6 +498,7 @@ public partial class MainWindow : Window
         var isSearchMode = mode == OverlayLayoutMode.Search;
         SearchRowDefinition.Height = new GridLength(isSearchMode ? 36 : 0);
         SearchBarContainer.Visibility = isSearchMode ? Visibility.Visible : Visibility.Collapsed;
+        NavigationProgressBar.Visibility = Visibility.Collapsed;
 
         if (animate)
         {
@@ -503,5 +581,56 @@ public partial class MainWindow : Window
         _ = sender;
         _indicatorHideTimer.Stop();
         ModeIndicatorTextBlock.Visibility = Visibility.Collapsed;
+    }
+
+    private void ShowHotkeyFeedback(string message)
+    {
+        ModeIndicatorTextBlock.Text = message;
+        ShowModeIndicatorTemporarily();
+    }
+
+    private void SetNavigationLoading(bool isLoading)
+    {
+        var shouldShow = isLoading && _layoutMode == OverlayLayoutMode.Search;
+        NavigationProgressBar.Visibility = shouldShow ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void ShowHotkeyHintIfNeeded()
+    {
+        if (_overlayConfig.HasShownHotkeyHint)
+        {
+            return;
+        }
+
+        HotkeyHintTextBlock.Visibility = Visibility.Visible;
+        _hotkeyHintHideTimer.Stop();
+        _hotkeyHintHideTimer.Start();
+
+        _overlayConfig.HasShownHotkeyHint = true;
+        _configService.Save(_overlayConfig);
+    }
+
+    private void OnHotkeyHintHideTimerTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _hotkeyHintHideTimer.Stop();
+        HotkeyHintTextBlock.Visibility = Visibility.Collapsed;
+    }
+
+    private static void PlayFeedbackTone()
+    {
+        if (!EnableAudioFeedback)
+        {
+            return;
+        }
+
+        try
+        {
+            SystemSounds.Asterisk.Play();
+        }
+        catch
+        {
+            // Ignore audio feedback issues.
+        }
     }
 }
