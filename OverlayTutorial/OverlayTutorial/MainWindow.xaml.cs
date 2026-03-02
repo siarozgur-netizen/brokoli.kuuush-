@@ -37,7 +37,7 @@ public partial class MainWindow : Window
     private const int LayoutAnimationMilliseconds = 160;
     private const int IndicatorVisibleMilliseconds = 1200;
     private const int HotkeyHintVisibleMilliseconds = 3000;
-    private const bool EnableAudioFeedback = true;
+    private static readonly bool EnableAudioFeedback = true;
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -111,10 +111,6 @@ public partial class MainWindow : Window
         _globalHotkeyService?.Dispose();
         OverlayWebView.NavigationCompleted -= OnWebViewNavigationCompleted;
         OverlayWebView.NavigationStarting -= OnWebViewNavigationStarting;
-        if (OverlayWebView.CoreWebView2 is not null)
-        {
-            OverlayWebView.CoreWebView2.AcceleratorKeyPressed -= OnWebViewAcceleratorKeyPressed;
-        }
         _indicatorHideTimer.Tick -= OnIndicatorHideTimerTick;
         _hotkeyHintHideTimer.Tick -= OnHotkeyHintHideTimerTick;
     }
@@ -290,7 +286,6 @@ public partial class MainWindow : Window
         await OverlayWebView.EnsureCoreWebView2Async(environment);
         OverlayWebView.NavigationCompleted += OnWebViewNavigationCompleted;
         OverlayWebView.NavigationStarting += OnWebViewNavigationStarting;
-        OverlayWebView.CoreWebView2.AcceleratorKeyPressed += OnWebViewAcceleratorKeyPressed;
 
         _isWebViewInitialized = true;
 
@@ -320,26 +315,6 @@ public partial class MainWindow : Window
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(e.Uri))
         {
             Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true));
-        }
-    }
-
-    private void OnWebViewAcceleratorKeyPressed(object? sender, CoreWebView2AcceleratorKeyPressedEventArgs e)
-    {
-        _ = sender;
-
-        if (e.VirtualKey != 0x1B)
-        {
-            return;
-        }
-
-        // Fully consume ESC in WebView so YouTube fullscreen doesn't process it.
-        e.Handled = true;
-
-        var isEscapeDown = e.KeyEventKind == CoreWebView2KeyEventKind.KeyDown ||
-                           e.KeyEventKind == CoreWebView2KeyEventKind.SystemKeyDown;
-        if (_isInteractMode && isEscapeDown)
-        {
-            Dispatcher.Invoke(() => SetInteractMode(false, showIndicator: true));
         }
     }
 
