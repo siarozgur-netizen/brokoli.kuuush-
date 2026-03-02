@@ -52,7 +52,6 @@ public partial class MainWindow : Window
     private OverlayLayoutMode _layoutMode = OverlayLayoutMode.Normal;
     private readonly DispatcherTimer _indicatorHideTimer = new();
     private readonly DispatcherTimer _hotkeyHintHideTimer = new();
-    private bool _pendingAutoFullscreenForVideo;
 
     public MainWindow()
     {
@@ -365,13 +364,7 @@ public partial class MainWindow : Window
         _overlayConfig.LastUrl = OverlayWebView.Source.ToString();
         _configService.Save(_overlayConfig);
 
-        _ = ApplySearchModePageChromeAsync(_layoutMode == OverlayLayoutMode.Search);
-
-        if (_pendingAutoFullscreenForVideo && IsVideoUrl(OverlayWebView.Source.ToString()))
-        {
-            _pendingAutoFullscreenForVideo = false;
-            _ = TryAutoEnterFullscreenPlaybackAsync();
-        }
+        _ = ApplySearchModePageChromeAsync();
     }
 
     private void OnWebViewNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
@@ -399,65 +392,104 @@ public partial class MainWindow : Window
     {
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(url))
         {
-            _pendingAutoFullscreenForVideo = true;
             Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true));
+
+            if (TryBuildEmbedVideoUrl(url, out var embedUrl))
+            {
+                NavigateTo(embedUrl);
+            }
         }
     }
 
-    private async Task TryAutoEnterFullscreenPlaybackAsync()
+    private static bool TryBuildEmbedVideoUrl(string? url, out string embedUrl)
     {
-        if (OverlayWebView.CoreWebView2 is null)
+        embedUrl = string.Empty;
+        if (!TryExtractYouTubeVideoId(url, out var videoId))
         {
-            return;
+            return false;
         }
 
-        const string fullscreenScript = """
-            (() => {
-              const video = document.querySelector('video');
-              if (!video) return false;
+        embedUrl = $"https://www.youtube.com/embed/{Uri.EscapeDataString(videoId)}?autoplay=1&playsinline=1&rel=0";
+        return true;
+    }
 
-              try {
-                if (video.paused) {
-                  const playResult = video.play();
-                  if (playResult && typeof playResult.catch === 'function') {
-                    playResult.catch(() => {});
-                  }
-                }
-              } catch {}
-
-              if (document.fullscreenElement) return true;
-
-              const fullscreenButton = document.querySelector('.ytp-fullscreen-button');
-              if (fullscreenButton) {
-                fullscreenButton.click();
-                return true;
-              }
-
-              if (typeof video.requestFullscreen === 'function') {
-                const fsResult = video.requestFullscreen();
-                if (fsResult && typeof fsResult.catch === 'function') {
-                  fsResult.catch(() => {});
-                }
-                return true;
-              }
-
-              return false;
-            })();
-            """;
-
-        for (var attempt = 0; attempt < 5; attempt++)
+    private static bool TryExtractYouTubeVideoId(string? url, out string videoId)
+    {
+        videoId = string.Empty;
+        if (string.IsNullOrWhiteSpace(url) || !Uri.TryCreate(url, UriKind.Absolute, out var uri))
         {
-            try
+            return false;
+        }
+
+        var host = uri.Host.ToLowerInvariant();
+        var segments = uri.AbsolutePath.Trim('/').Split('/', StringSplitOptions.RemoveEmptyEntries);
+
+        if (host == "youtu.be" || host.EndsWith(".youtu.be", StringComparison.Ordinal))
+        {
+            if (segments.Length > 0 && !string.IsNullOrWhiteSpace(segments[0]))
             {
-                _ = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(fullscreenScript);
-            }
-            catch
-            {
-                // Ignore transient script execution failures while page is stabilizing.
+                videoId = segments[0];
+                return true;
             }
 
-            await Task.Delay(220);
+            return false;
         }
+
+        if (!host.Contains("youtube.com", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        if (segments.Length >= 2 &&
+            (string.Equals(segments[0], "watch", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(segments[0], "shorts", StringComparison.OrdinalIgnoreCase) ||
+             string.Equals(segments[0], "embed", StringComparison.OrdinalIgnoreCase)))
+        {
+            if (string.Equals(segments[0], "watch", StringComparison.OrdinalIgnoreCase))
+            {
+                return TryGetQueryValue(uri.Query, "v", out videoId);
+            }
+
+            videoId = segments[1];
+            return !string.IsNullOrWhiteSpace(videoId);
+        }
+
+        if (string.Equals(uri.AbsolutePath, "/watch", StringComparison.OrdinalIgnoreCase))
+        {
+            return TryGetQueryValue(uri.Query, "v", out videoId);
+        }
+
+        return false;
+    }
+
+    private static bool TryGetQueryValue(string? query, string key, out string value)
+    {
+        value = string.Empty;
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return false;
+        }
+
+        var parts = query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var part in parts)
+        {
+            var pair = part.Split('=', 2);
+            if (pair.Length == 0)
+            {
+                continue;
+            }
+
+            var currentKey = Uri.UnescapeDataString(pair[0]);
+            if (!string.Equals(currentKey, key, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            value = pair.Length > 1 ? Uri.UnescapeDataString(pair[1]) : string.Empty;
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        return false;
     }
 
     private static string GetStartupUrl(string? lastUrl)
@@ -642,7 +674,7 @@ public partial class MainWindow : Window
             FocusSearchBarWithActivation();
         }
 
-        _ = ApplySearchModePageChromeAsync(isSearchMode);
+        _ = ApplySearchModePageChromeAsync();
     }
 
     private void AnimateWindowLayout(double targetLeft, double targetTop, double targetWidth, double targetHeight)
@@ -761,7 +793,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task ApplySearchModePageChromeAsync(bool isSearchMode)
+    private async Task ApplySearchModePageChromeAsync()
     {
         if (OverlayWebView.CoreWebView2 is null)
         {
@@ -769,11 +801,12 @@ public partial class MainWindow : Window
         }
 
         const string styleId = "overlay-search-mode-style";
-        var script = isSearchMode
-            ? $$"""
+        var script = $$"""
             (() => {
               const existing = document.getElementById('{{styleId}}');
-              if (existing) return;
+              if (existing) {
+                return;
+              }
 
               const style = document.createElement('style');
               style.id = '{{styleId}}';
@@ -787,14 +820,6 @@ public partial class MainWindow : Window
                 }
               `;
               document.documentElement.appendChild(style);
-            })();
-            """
-            : $$"""
-            (() => {
-              const existing = document.getElementById('{{styleId}}');
-              if (existing) {
-                existing.remove();
-              }
             })();
             """;
 

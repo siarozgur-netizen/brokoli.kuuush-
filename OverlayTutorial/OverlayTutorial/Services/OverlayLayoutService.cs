@@ -9,7 +9,7 @@ public sealed class OverlayLayoutService
     private const double NormalAspectRatioHeight = 9.0;
     private const double SearchWidthRatio = 0.24;
     private const double SearchAspectRatioWidth = 9.0;
-    private const double SearchAspectRatioHeight = 20.0;
+    private const double SearchAspectRatioHeight = 16.0;
     private const double HorizontalMarginRatio = 0.03;
     private const double VerticalMarginRatio = 0.03;
 
@@ -25,10 +25,12 @@ public sealed class OverlayLayoutService
 
     public Size CalculateSearchSize(double primaryScreenWidth, double primaryScreenHeight)
     {
+        _ = primaryScreenHeight;
         var width = primaryScreenWidth * SearchWidthRatio;
         var height = width * (SearchAspectRatioHeight / SearchAspectRatioWidth);
 
-        var maxHeight = primaryScreenHeight - (primaryScreenHeight * VerticalMarginRatio * 2);
+        var workArea = SystemParameters.WorkArea;
+        var maxHeight = workArea.Height - (workArea.Height * VerticalMarginRatio * 2);
         if (height > maxHeight)
         {
             height = maxHeight;
@@ -43,11 +45,24 @@ public sealed class OverlayLayoutService
         double primaryScreenHeight,
         Size overlaySize)
     {
-        var rightMargin = primaryScreenWidth * HorizontalMarginRatio;
-        var topMargin = primaryScreenHeight * VerticalMarginRatio;
+        _ = primaryScreenWidth;
+        _ = primaryScreenHeight;
+        var workArea = SystemParameters.WorkArea;
+        var rightMargin = workArea.Width * HorizontalMarginRatio;
+        var topMargin = workArea.Height * VerticalMarginRatio;
 
-        var x = primaryScreenWidth - overlaySize.Width - rightMargin;
-        var y = topMargin;
+        var x = workArea.Right - overlaySize.Width - rightMargin;
+        var y = workArea.Top + topMargin;
+
+        if (x < workArea.Left)
+        {
+            x = workArea.Left;
+        }
+
+        if (y < workArea.Top)
+        {
+            y = workArea.Top;
+        }
 
         return new Point(x, y);
     }
