@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Threading;
 using System.Windows.Media.Animation;
 using System.Windows;
 using System.Windows.Interop;
@@ -61,6 +62,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _indicatorHideTimer = new();
     private readonly DispatcherTimer _hotkeyHintHideTimer = new();
     private bool _pendingVideoUiOptimization;
+    private int _layoutTransitionVersion;
 
     public MainWindow()
     {
@@ -261,7 +263,7 @@ public partial class MainWindow : Window
     {
         if (_layoutMode == OverlayLayoutMode.Search)
         {
-            ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true);
+            EnterTheaterMode(animate: true, showIndicator: true);
             ShowHotkeyFeedback("THEATER MODE");
             PlayFeedbackTone();
             return;
@@ -382,9 +384,24 @@ public partial class MainWindow : Window
 
         const string script = """
             (() => {
+              const muteButton = document.querySelector('.ytp-mute-button');
+              if (muteButton) {
+                muteButton.click();
+              }
+
               const video = document.querySelector('video');
-              if (!video) return null;
-              video.muted = !video.muted;
+              if (!video) {
+                return null;
+              }
+
+              if (!muteButton) {
+                video.muted = !video.muted;
+              }
+
+              if (!video.muted && video.volume === 0) {
+                video.volume = 0.5;
+              }
+
               return video.muted ? "ON" : "OFF";
             })();
             """;
@@ -590,8 +607,20 @@ public partial class MainWindow : Window
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(url))
         {
             _pendingVideoUiOptimization = true;
-            Dispatcher.Invoke(() => ApplyLayoutMode(OverlayLayoutMode.Normal, animate: true, showIndicator: true));
+            Dispatcher.Invoke(() => EnterTheaterMode(animate: true, showIndicator: true));
         }
+    }
+
+    private void EnterTheaterMode(bool animate, bool showIndicator)
+    {
+        ApplyLayoutMode(OverlayLayoutMode.Normal, animate: animate, showIndicator: showIndicator);
+
+        // Hard-enforce PASS after search->theater transitions to avoid sticky interaction state.
+        _isInteractMode = false;
+        _overlayWindowModeService?.SetPassMode(true);
+        UpdateSearchInputAvailability();
+        Keyboard.ClearFocus();
+        _ = ApplySearchModePageChromeAsync();
     }
 
     private async Task OptimizeVideoPageUiAsync()
@@ -790,6 +819,7 @@ public partial class MainWindow : Window
     private void ApplyLayoutMode(OverlayLayoutMode mode, bool animate, bool showIndicator = true)
     {
         _layoutMode = mode;
+        var transitionVersion = Interlocked.Increment(ref _layoutTransitionVersion);
 
         var screenWidth = SystemParameters.PrimaryScreenWidth;
         var screenHeight = SystemParameters.PrimaryScreenHeight;
@@ -807,7 +837,7 @@ public partial class MainWindow : Window
         if (animate)
         {
             AnimateWindowLayout(position.X, position.Y, size.Width, size.Height);
-            _ = EnsureFinalWindowBoundsAsync(position.X, position.Y, size.Width, size.Height);
+            _ = EnsureFinalWindowBoundsAsync(position.X, position.Y, size.Width, size.Height, transitionVersion);
         }
         else
         {
@@ -946,9 +976,20 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task EnsureFinalWindowBoundsAsync(double targetLeft, double targetTop, double targetWidth, double targetHeight)
+    private async Task EnsureFinalWindowBoundsAsync(
+        double targetLeft,
+        double targetTop,
+        double targetWidth,
+        double targetHeight,
+        int expectedTransitionVersion)
     {
         await Task.Delay(LayoutAnimationMilliseconds + 25);
+
+        if (expectedTransitionVersion != _layoutTransitionVersion)
+        {
+            return;
+        }
+
         Left = targetLeft;
         Top = targetTop;
         Width = targetWidth;
@@ -988,16 +1029,18 @@ public partial class MainWindow : Window
             return;
         }
 
+        var overflowY = _layoutMode == OverlayLayoutMode.Search ? "auto" : "hidden";
+        var overscroll = _layoutMode == OverlayLayoutMode.Search ? "auto" : "none";
         const string styleId = "overlay-search-mode-style";
         var script = $$"""
             (() => {
-              const existing = document.getElementById('{{styleId}}');
-              if (existing) {
-                return;
+              let style = document.getElementById('{{styleId}}');
+              if (!style) {
+                style = document.createElement('style');
+                style.id = '{{styleId}}';
+                document.documentElement.appendChild(style);
               }
 
-              const style = document.createElement('style');
-              style.id = '{{styleId}}';
               style.textContent = `
                 ytd-masthead, #masthead-container, tp-yt-app-header-layout #masthead {
                   display: none !important;
@@ -1005,15 +1048,14 @@ public partial class MainWindow : Window
                 ytd-app, ytd-page-manager, #page-manager {
                   margin-top: 0 !important;
                   padding-top: 0 !important;
-                  overflow-y: auto !important;
-                  overscroll-behavior: auto !important;
+                  overflow-y: {{overflowY}} !important;
+                  overscroll-behavior: {{overscroll}} !important;
                 }
                 html, body, #content {
-                  overflow-y: auto !important;
-                  overscroll-behavior: auto !important;
+                  overflow-y: {{overflowY}} !important;
+                  overscroll-behavior: {{overscroll}} !important;
                 }
               `;
-              document.documentElement.appendChild(style);
             })();
             """;
 
