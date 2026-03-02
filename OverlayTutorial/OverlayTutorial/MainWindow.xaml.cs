@@ -28,6 +28,7 @@ public partial class MainWindow : Window
     private const int FocusSearchHotkeyId = 5;
     private const int ToggleSearchModeHotkeyId = 6;
     private const int ExitAppHotkeyId = 7;
+    private const int TogglePlaybackHotkeyId = 8;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
@@ -92,7 +93,7 @@ public partial class MainWindow : Window
         _currentOpacity = NormalizeOpacity(_overlayConfig.Opacity);
         _overlayConfig.Opacity = _currentOpacity;
         ApplyOpacity(_currentOpacity, persist: false);
-        _layoutMode = ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
+        _layoutMode = OverlayLayoutMode.Search;
 
         RegisterGlobalHotkeys();
         SetInteractMode(_layoutMode == OverlayLayoutMode.Search, showIndicator: false);
@@ -158,6 +159,11 @@ public partial class MainWindow : Window
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Q hotkey.");
         }
+
+        if (!_globalHotkeyService.Register(TogglePlaybackHotkeyId, modifiers, (uint)'P', TogglePlayback))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+P hotkey.");
+        }
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -214,6 +220,35 @@ public partial class MainWindow : Window
     {
         PlayFeedbackTone();
         Close();
+    }
+
+    private async void TogglePlayback()
+    {
+        if (OverlayWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        const string script = """
+            (() => {
+              const video = document.querySelector('video');
+              if (!video) return false;
+              if (video.paused) video.play();
+              else video.pause();
+              return true;
+            })();
+            """;
+
+        try
+        {
+            _ = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+            ShowHotkeyFeedback("PLAY/PAUSE");
+            PlayFeedbackTone();
+        }
+        catch
+        {
+            // Ignore script errors.
+        }
     }
 
     private void IncreaseOpacity()
@@ -320,17 +355,7 @@ public partial class MainWindow : Window
 
     private static string GetStartupUrl(string? lastUrl)
     {
-        if (string.IsNullOrWhiteSpace(lastUrl))
-        {
-            return $"{YouTubeSearchUrlPrefix}";
-        }
-
-        if (Uri.TryCreate(lastUrl, UriKind.Absolute, out var uri) &&
-            (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps))
-        {
-            return uri.ToString();
-        }
-
+        _ = lastUrl;
         return $"{YouTubeSearchUrlPrefix}";
     }
 
@@ -422,33 +447,6 @@ public partial class MainWindow : Window
         UpdateSearchPlaceholderVisibility();
     }
 
-    private void OnWindowPreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        _ = sender;
-
-        if (e.Key != Key.Escape)
-        {
-            return;
-        }
-
-        if (_isInteractMode)
-        {
-            SetInteractMode(false, showIndicator: true);
-        }
-
-        e.Handled = true;
-    }
-
-    private void OnWindowPreviewKeyUp(object sender, KeyEventArgs e)
-    {
-        _ = sender;
-
-        if (e.Key == Key.Escape)
-        {
-            e.Handled = true;
-        }
-    }
-
     private void UpdateSearchPlaceholderVisibility()
     {
         var shouldShow = string.IsNullOrWhiteSpace(SearchTextBox.Text) && !SearchTextBox.IsKeyboardFocused;
@@ -458,8 +456,6 @@ public partial class MainWindow : Window
     private void ApplyLayoutMode(OverlayLayoutMode mode, bool animate, bool showIndicator = true)
     {
         _layoutMode = mode;
-        _overlayConfig.PreferredLayoutMode = mode.ToString();
-        _configService.Save(_overlayConfig);
 
         var screenWidth = SystemParameters.PrimaryScreenWidth;
         var screenHeight = SystemParameters.PrimaryScreenHeight;
@@ -493,6 +489,7 @@ public partial class MainWindow : Window
         else
         {
             SetInteractMode(true, showIndicator);
+            FocusSearchBar();
         }
     }
 
@@ -540,7 +537,7 @@ public partial class MainWindow : Window
 
     private OverlayLayoutMode GetInitialLayoutMode()
     {
-        return ParseLayoutMode(_overlayConfig.PreferredLayoutMode);
+        return OverlayLayoutMode.Search;
     }
 
     private void ShowModeIndicatorTemporarily()

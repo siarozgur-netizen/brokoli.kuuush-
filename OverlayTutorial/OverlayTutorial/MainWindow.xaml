@@ -8,9 +8,7 @@
         ShowInTaskbar="False"
         Topmost="True"
         Background="#000000"
-        Opacity="1.0"
-        PreviewKeyDown="OnWindowPreviewKeyDown"
-        PreviewKeyUp="OnWindowPreviewKeyUp">
+        Opacity="1.0">
     <Grid>
         <Grid.RowDefinitions>
             <RowDefinition x:Name="SearchRowDefinition" Height="36" />
