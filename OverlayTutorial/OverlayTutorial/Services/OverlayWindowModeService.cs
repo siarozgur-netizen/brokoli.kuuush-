@@ -20,8 +20,9 @@ public sealed class OverlayWindowModeService
             _windowHandle,
             (childHandle, _) =>
             {
-                // Applying WS_EX_LAYERED on WebView child windows can cause black rendering.
-                ApplyTransparentStyle(childHandle, passModeEnabled, includeLayeredStyle: false);
+                // Disabling child windows in PASS mode prevents WebView from receiving input
+                // without forcing fragile style changes that can cause black rendering.
+                _ = NativeMethods.EnableWindow(childHandle, !passModeEnabled);
                 return true;
             },
             IntPtr.Zero);

@@ -50,6 +50,9 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool EnumChildWindows(IntPtr hWndParent, EnumWindowsProc lpEnumFunc, IntPtr lParam);
 
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern bool EnableWindow(IntPtr hWnd, bool bEnable);
+
     [DllImport("user32.dll", EntryPoint = "GetWindowLong")]
     private static extern int GetWindowLong32(IntPtr hWnd, int nIndex);
 
