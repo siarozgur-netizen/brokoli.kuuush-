@@ -1341,8 +1341,5 @@ public partial class MainWindow : Window
         settings.IsZoomControlEnabled = false;
         settings.AreDefaultContextMenusEnabled = false;
         settings.AreBrowserAcceleratorKeysEnabled = false;
-        settings.IsSwipeNavigationEnabled = false;
-        settings.IsGeneralAutofillEnabled = false;
-        settings.IsPasswordAutosaveEnabled = false;
     }
 }
