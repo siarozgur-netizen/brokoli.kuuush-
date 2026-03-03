@@ -326,7 +326,7 @@ public partial class MainWindow : Window
 
     private static DrawingIcon? LoadTrayIconFromResources()
     {
-        var resource = Application.GetResourceStream(new Uri("pack://application:,,,/Assets/overlay_icon.ico"));
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/overlay_icon.ico"));
         if (resource is null)
         {
             return null;
