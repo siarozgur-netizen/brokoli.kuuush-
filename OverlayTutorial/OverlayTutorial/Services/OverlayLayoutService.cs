@@ -1,3 +1,4 @@
+using System.Windows;
 using Size = System.Windows.Size;
 using Point = System.Windows.Point;
 using Window = System.Windows.Window;
