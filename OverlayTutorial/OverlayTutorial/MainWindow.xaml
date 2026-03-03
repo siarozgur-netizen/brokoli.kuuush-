@@ -79,7 +79,7 @@
                    Panel.ZIndex="1000" />
 
         <TextBlock x:Name="HotkeyHintTextBlock"
-                   Text="O show/hide • I interact • S search • F focus • H home • P play/pause • K/L (,/.) seek • ←/→ volume • M mute • Q quit"
+                   Text="C help • O show/hide • I interact • S search • F focus • H theater • P play/pause • K/L (,/.) seek • ↑/↓ volume • ←/→ prev/next • M mute • Q quit"
                    Foreground="#E6FFFFFF"
                    FontSize="11"
                    Margin="10,0,10,10"

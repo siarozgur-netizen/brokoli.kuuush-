@@ -32,20 +32,22 @@ public partial class MainWindow : Window
     private const int TogglePlaybackHotkeyId = 8;
     private const int IncreaseVolumeHotkeyId = 9;
     private const int DecreaseVolumeHotkeyId = 10;
+    private const int PreviousVideoHotkeyId = 15;
+    private const int NextVideoHotkeyId = 16;
     private const int SeekBackwardHotkeyId = 11;
     private const int SeekForwardHotkeyId = 12;
     private const int ToggleMuteHotkeyId = 13;
     private const int NavigateHomeHotkeyId = 14;
+    private const int ToggleCheatSheetHotkeyId = 17;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
     private const double OpacityStep = 0.10;
     private const double DefaultOpacity = 1.00;
-    private const string YouTubeHomeUrl = "https://www.youtube.com";
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
     private const int LayoutAnimationMilliseconds = 160;
     private const int IndicatorVisibleMilliseconds = 1200;
-    private const int HotkeyHintVisibleMilliseconds = 3000;
+    private const int HotkeyHintVisibleMilliseconds = 5000;
     private const double VolumeStep = 0.10;
     private static readonly bool EnableAudioFeedback = false;
 
@@ -63,6 +65,7 @@ public partial class MainWindow : Window
     private readonly DispatcherTimer _hotkeyHintHideTimer = new();
     private bool _pendingVideoUiOptimization;
     private int _layoutTransitionVersion;
+    private bool _suspendAutoTheaterFromVideoUrl;
 
     public MainWindow()
     {
@@ -150,14 +153,14 @@ public partial class MainWindow : Window
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+I hotkey.");
         }
 
-        if (!_globalHotkeyService.Register(IncreaseOpacityHotkeyId, modifiers, NativeMethods.VK_UP, IncreaseOpacity))
+        if (!_globalHotkeyService.Register(IncreaseOpacityHotkeyId, modifiers, (uint)'U', IncreaseOpacity))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Up hotkey.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+U hotkey.");
         }
 
-        if (!_globalHotkeyService.Register(DecreaseOpacityHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseOpacity))
+        if (!_globalHotkeyService.Register(DecreaseOpacityHotkeyId, modifiers, (uint)'J', DecreaseOpacity))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Down hotkey.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+J hotkey.");
         }
 
         if (!_globalHotkeyService.Register(FocusSearchHotkeyId, modifiers, (uint)'F', FocusSearchBar))
@@ -180,14 +183,14 @@ public partial class MainWindow : Window
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+P hotkey.");
         }
 
-        if (!_globalHotkeyService.Register(IncreaseVolumeHotkeyId, modifiers, NativeMethods.VK_RIGHT, IncreaseVolume))
+        if (!_globalHotkeyService.Register(IncreaseVolumeHotkeyId, modifiers, NativeMethods.VK_UP, IncreaseVolume))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Right hotkey.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Up hotkey.");
         }
 
-        if (!_globalHotkeyService.Register(DecreaseVolumeHotkeyId, modifiers, NativeMethods.VK_LEFT, DecreaseVolume))
+        if (!_globalHotkeyService.Register(DecreaseVolumeHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseVolume))
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Left hotkey.");
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Down hotkey.");
         }
 
         if (!_globalHotkeyService.Register(SeekBackwardHotkeyId, modifiers, (uint)'K', SeekBackward) &&
@@ -207,9 +210,24 @@ public partial class MainWindow : Window
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+M hotkey.");
         }
 
-        if (!_globalHotkeyService.Register(NavigateHomeHotkeyId, modifiers, (uint)'H', NavigateHome))
+        if (!_globalHotkeyService.Register(NavigateHomeHotkeyId, modifiers, (uint)'H', ForceTheaterMode))
         {
             throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+H hotkey.");
+        }
+
+        if (!_globalHotkeyService.Register(PreviousVideoHotkeyId, modifiers, NativeMethods.VK_LEFT, PreviousVideo))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Left hotkey.");
+        }
+
+        if (!_globalHotkeyService.Register(NextVideoHotkeyId, modifiers, NativeMethods.VK_RIGHT, NextVideo))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Right hotkey.");
+        }
+
+        if (!_globalHotkeyService.Register(ToggleCheatSheetHotkeyId, modifiers, (uint)'C', ToggleCheatSheet))
+        {
+            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+C hotkey.");
         }
     }
 
@@ -263,13 +281,16 @@ public partial class MainWindow : Window
     {
         if (_layoutMode == OverlayLayoutMode.Search)
         {
-            EnterTheaterMode(animate: true, showIndicator: true);
+            _suspendAutoTheaterFromVideoUrl = false;
+            _pendingVideoUiOptimization = false;
+            EnterTheaterMode(animate: false, showIndicator: true);
             ShowHotkeyFeedback("THEATER MODE");
             PlayFeedbackTone();
             return;
         }
 
         _ = ExitWebContentFullscreenIfNeededAsync();
+        _suspendAutoTheaterFromVideoUrl = true;
         ApplyLayoutMode(OverlayLayoutMode.Search, animate: true, showIndicator: true);
         NavigateToSearchHome();
         FocusSearchBarWithActivation();
@@ -325,6 +346,16 @@ public partial class MainWindow : Window
     private void ToggleMute()
     {
         _ = ToggleMuteAsync();
+    }
+
+    private void PreviousVideo()
+    {
+        _ = ChangeVideoAsync(next: false);
+    }
+
+    private void NextVideo()
+    {
+        _ = ChangeVideoAsync(next: true);
     }
 
     private async Task AdjustVolumeAsync(double delta)
@@ -384,38 +415,95 @@ public partial class MainWindow : Window
 
         const string script = """
             (() => {
-              const muteButton = document.querySelector('.ytp-mute-button');
-              if (muteButton) {
-                muteButton.click();
+              const player = document.getElementById('movie_player');
+              if (player && typeof player.isMuted === 'function') {
+                if (player.isMuted()) player.unMute();
+                else player.mute();
+                return player.isMuted() ? "ON" : "OFF";
               }
 
               const video = document.querySelector('video');
-              if (!video) {
-                return null;
-              }
-
-              if (!muteButton) {
+              if (video) {
                 video.muted = !video.muted;
+                if (!video.muted && video.volume === 0) {
+                  video.volume = 0.5;
+                }
+                return video.muted ? "ON" : "OFF";
               }
 
-              if (!video.muted && video.volume === 0) {
-                video.volume = 0.5;
+              const muteButton = document.querySelector('.ytp-mute-button,[aria-label*="Mute"],[aria-label*="Unmute"]');
+              if (muteButton) {
+                muteButton.click();
+                const nextVideo = document.querySelector('video');
+                if (nextVideo) {
+                  return nextVideo.muted ? "ON" : "OFF";
+                }
               }
 
-              return video.muted ? "ON" : "OFF";
+              return "NA";
             })();
             """;
 
         try
         {
             var result = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
-            if (string.Equals(result, "null", StringComparison.OrdinalIgnoreCase))
+            var state = result.Trim('\"');
+            if (string.Equals(state, "NA", StringComparison.OrdinalIgnoreCase))
             {
+                ShowHotkeyFeedback("MUTE N/A");
+            }
+            else
+            {
+                ShowHotkeyFeedback($"MUTE {state}");
+            }
+
+            PlayFeedbackTone();
+        }
+        catch
+        {
+            // Ignore script errors.
+        }
+    }
+
+    private async Task ChangeVideoAsync(bool next)
+    {
+        if (OverlayWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var script = next
+            ? """
+            (() => {
+              const nextButton = document.querySelector('.ytp-next-button');
+              if (nextButton && !nextButton.disabled) {
+                nextButton.click();
+                return true;
+              }
+              return false;
+            })();
+            """
+            : """
+            (() => {
+              const prevButton = document.querySelector('.ytp-prev-button');
+              if (prevButton && !prevButton.disabled) {
+                prevButton.click();
+                return true;
+              }
+              return false;
+            })();
+            """;
+
+        try
+        {
+            var result = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+            if (!string.Equals(result, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                ShowHotkeyFeedback(next ? "NEXT N/A" : "PREV N/A");
                 return;
             }
 
-            var state = result.Trim('\"');
-            ShowHotkeyFeedback($"MUTE {state}");
+            ShowHotkeyFeedback(next ? "NEXT VIDEO" : "PREV VIDEO");
             PlayFeedbackTone();
         }
         catch
@@ -434,11 +522,25 @@ public partial class MainWindow : Window
         _ = SeekBySecondsAsync(10);
     }
 
-    private void NavigateHome()
+    private void ForceTheaterMode()
     {
-        NavigateTo(YouTubeHomeUrl);
-        ShowHotkeyFeedback("HOME");
+        EnterTheaterMode(animate: true, showIndicator: true);
+        ShowHotkeyFeedback("THEATER FORCED");
         PlayFeedbackTone();
+    }
+
+    private void ToggleCheatSheet()
+    {
+        if (HotkeyHintTextBlock.Visibility == Visibility.Visible)
+        {
+            _hotkeyHintHideTimer.Stop();
+            HotkeyHintTextBlock.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        HotkeyHintTextBlock.Visibility = Visibility.Visible;
+        _hotkeyHintHideTimer.Stop();
+        _hotkeyHintHideTimer.Start();
     }
 
     private async Task SeekBySecondsAsync(int seconds)
@@ -572,6 +674,11 @@ public partial class MainWindow : Window
         _overlayConfig.LastUrl = OverlayWebView.Source.ToString();
         _configService.Save(_overlayConfig);
 
+        if (_layoutMode == OverlayLayoutMode.Search && !IsVideoUrl(OverlayWebView.Source.ToString()))
+        {
+            _suspendAutoTheaterFromVideoUrl = false;
+        }
+
         _ = ApplySearchModePageChromeAsync();
 
         if (_pendingVideoUiOptimization && IsVideoUrl(OverlayWebView.Source.ToString()))
@@ -604,6 +711,11 @@ public partial class MainWindow : Window
 
     private void TrySwitchToTheaterFromUrl(string? url)
     {
+        if (_suspendAutoTheaterFromVideoUrl)
+        {
+            return;
+        }
+
         if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(url))
         {
             _pendingVideoUiOptimization = true;
@@ -613,6 +725,7 @@ public partial class MainWindow : Window
 
     private void EnterTheaterMode(bool animate, bool showIndicator)
     {
+        _suspendAutoTheaterFromVideoUrl = false;
         ApplyLayoutMode(OverlayLayoutMode.Normal, animate: animate, showIndicator: showIndicator);
 
         // Hard-enforce PASS after search->theater transitions to avoid sticky interaction state.
@@ -841,6 +954,7 @@ public partial class MainWindow : Window
         }
         else
         {
+            StopLayoutAnimations();
             Left = position.X;
             Top = position.Y;
             Width = size.Width;
@@ -862,6 +976,7 @@ public partial class MainWindow : Window
 
     private void AnimateWindowLayout(double targetLeft, double targetTop, double targetWidth, double targetHeight)
     {
+        StopLayoutAnimations();
         var duration = TimeSpan.FromMilliseconds(LayoutAnimationMilliseconds);
         var easing = new QuadraticEase { EasingMode = EasingMode.EaseOut };
 
@@ -990,10 +1105,19 @@ public partial class MainWindow : Window
             return;
         }
 
+        StopLayoutAnimations();
         Left = targetLeft;
         Top = targetTop;
         Width = targetWidth;
         Height = targetHeight;
+    }
+
+    private void StopLayoutAnimations()
+    {
+        BeginAnimation(LeftProperty, null);
+        BeginAnimation(TopProperty, null);
+        BeginAnimation(WidthProperty, null);
+        BeginAnimation(HeightProperty, null);
     }
 
     private async Task ExitWebContentFullscreenIfNeededAsync()
