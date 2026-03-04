@@ -13,7 +13,7 @@ public sealed class OverlayLayoutService
     private const double SearchWidthRatio = 0.24;
     private const double SearchAspectRatioWidth = 9.0;
     private const double SearchAspectRatioHeight = 16.0;
-    private const double HomeWidthRatio = 0.42;
+    private const double HomeWidthRatio = 0.30;
     private const double HomeAspectRatioWidth = 16.0;
     private const double HomeAspectRatioHeight = 10.0;
     private const double HorizontalMarginRatio = 0.03;

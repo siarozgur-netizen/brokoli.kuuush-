@@ -575,12 +575,12 @@ public partial class MainWindow : Window
 
     private void OpenHomeMode()
     {
-        _suspendAutoTheaterFromVideoUrl = true;
+        _suspendAutoTheaterFromVideoUrl = false;
         ApplyLayoutMode(OverlayLayoutMode.Home, animate: true, showIndicator: true);
         SetInteractMode(true, showIndicator: false);
         NavigateTo(YouTubeHomeUrl);
         OverlayWebView.Focus();
-        ShowHotkeyFeedback("HOME MODE");
+        ShowHotkeyFeedback("MINI YOUTUBE");
         PlayFeedbackTone();
     }
 
@@ -744,6 +744,7 @@ public partial class MainWindow : Window
         OverlayWebView.CoreWebView2.SourceChanged += OnWebViewSourceChanged;
         OverlayWebView.CoreWebView2.ProcessFailed += OnWebViewProcessFailed;
         ConfigureWebViewSettings();
+        UpdateWebViewZoomForMode(_layoutMode);
 
         _isWebViewInitialized = true;
 
@@ -840,7 +841,7 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (_layoutMode == OverlayLayoutMode.Search && IsVideoUrl(url))
+        if ((_layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home) && IsVideoUrl(url))
         {
             _pendingVideoUiOptimization = true;
             Dispatcher.Invoke(() => EnterTheaterMode(animate: true, showIndicator: true));
@@ -1115,6 +1116,7 @@ public partial class MainWindow : Window
             FocusSearchBarWithActivation();
         }
 
+        UpdateWebViewZoomForMode(mode);
         _ = ApplySearchModePageChromeAsync();
     }
 
@@ -1320,8 +1322,10 @@ public partial class MainWindow : Window
             return;
         }
 
-        var overflowY = _layoutMode == OverlayLayoutMode.Search ? "auto" : "hidden";
-        var overscroll = _layoutMode == OverlayLayoutMode.Search ? "auto" : "none";
+        var isBrowseMode = _layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home;
+        var overflowY = isBrowseMode ? "auto" : "hidden";
+        var overscroll = isBrowseMode ? "auto" : "none";
+        var overflowX = "hidden";
         const string styleId = "overlay-search-mode-style";
         var script = $$"""
             (() => {
@@ -1339,10 +1343,12 @@ public partial class MainWindow : Window
                 ytd-app, ytd-page-manager, #page-manager {
                   margin-top: 0 !important;
                   padding-top: 0 !important;
+                  overflow-x: {{overflowX}} !important;
                   overflow-y: {{overflowY}} !important;
                   overscroll-behavior: {{overscroll}} !important;
                 }
                 html, body, #content {
+                  overflow-x: {{overflowX}} !important;
                   overflow-y: {{overflowY}} !important;
                   overscroll-behavior: {{overscroll}} !important;
                 }
@@ -1372,5 +1378,16 @@ public partial class MainWindow : Window
         settings.IsZoomControlEnabled = false;
         settings.AreDefaultContextMenusEnabled = false;
         settings.AreBrowserAcceleratorKeysEnabled = false;
+    }
+
+    private void UpdateWebViewZoomForMode(OverlayLayoutMode mode)
+    {
+        if (OverlayWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        // Home mode needs denser layout so users can browse and pick videos comfortably.
+        OverlayWebView.ZoomFactor = mode == OverlayLayoutMode.Home ? 0.75 : 1.0;
     }
 }
