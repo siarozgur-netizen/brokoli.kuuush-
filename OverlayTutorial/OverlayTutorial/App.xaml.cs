@@ -11,6 +11,7 @@ public partial class App : System.Windows.Application
 {
     private static readonly object LogLock = new();
     private const int StartupFlashMilliseconds = 320;
+    private const int StartupGuideMilliseconds = 5000;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -39,7 +40,28 @@ public partial class App : System.Windows.Application
         MainWindow = window;
         window.Show();
 
+        _ = ShowStartupGuideAsync();
+
         flashWindow?.Close();
+    }
+
+    private async Task ShowStartupGuideAsync()
+    {
+        StartupGuideWindow? guideWindow = null;
+        try
+        {
+            guideWindow = new StartupGuideWindow();
+            guideWindow.Show();
+            await Task.Delay(StartupGuideMilliseconds);
+        }
+        catch
+        {
+            // Keep startup resilient even if guide window fails.
+        }
+        finally
+        {
+            guideWindow?.Close();
+        }
     }
 
     private void RegisterGlobalExceptionHandlers()

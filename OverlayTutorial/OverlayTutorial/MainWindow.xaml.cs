@@ -93,7 +93,6 @@ public partial class MainWindow : Window
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         ApplyLayoutMode(GetInitialLayoutMode(), animate: false, showIndicator: false);
-        _ = ShowStartupHotkeyHintAsync();
         try
         {
             await InitializeWebViewAsync();
@@ -330,7 +329,7 @@ public partial class MainWindow : Window
 
     private static DrawingIcon? LoadTrayIconFromResources()
     {
-        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/overlay_icon.ico"));
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/playlayer_icon.ico"));
         if (resource is null)
         {
             return null;
@@ -1207,13 +1206,6 @@ public partial class MainWindow : Window
         HotkeyOverlayPanel.Visibility = Visibility.Visible;
         _hotkeyHintHideTimer.Stop();
         _hotkeyHintHideTimer.Start();
-    }
-
-    private async Task ShowStartupHotkeyHintAsync()
-    {
-        await Dispatcher.InvokeAsync(() => { }, DispatcherPriority.ContextIdle);
-        await Task.Delay(250);
-        ShowHotkeyHintIfNeeded();
     }
 
     private void UpdateStateBorder()
