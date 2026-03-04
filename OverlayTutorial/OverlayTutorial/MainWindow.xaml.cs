@@ -74,6 +74,7 @@ public partial class MainWindow : Window
     private bool _suspendAutoTheaterFromVideoUrl;
     private CancellationTokenSource? _videoOptimizeCts;
     private bool _isRecoveringWebView;
+    private bool _hasHotkeyRegistrationFailure;
     private WinForms.NotifyIcon? _notifyIcon;
     private WinForms.ContextMenuStrip? _trayMenu;
 
@@ -121,6 +122,10 @@ public partial class MainWindow : Window
         _layoutMode = GetInitialLayoutMode();
 
         RegisterGlobalHotkeys();
+        if (_hasHotkeyRegistrationFailure)
+        {
+            ShowHotkeyFeedback("SOME HOTKEYS UNAVAILABLE");
+        }
         SetInteractMode(_layoutMode == OverlayLayoutMode.Search, showIndicator: false);
         ApplyLayoutMode(_layoutMode, animate: false, showIndicator: false);
         UpdateSearchPlaceholderVisibility();
@@ -158,93 +163,50 @@ public partial class MainWindow : Window
         }
 
         var modifiers = NativeMethods.MOD_CONTROL | NativeMethods.MOD_ALT;
+        RegisterHotkeyOrMark(ToggleVisibilityHotkeyId, modifiers, (uint)'O', ToggleVisibility);
+        RegisterHotkeyOrMark(ToggleInteractHotkeyId, modifiers, (uint)'I', ToggleInteractMode);
+        RegisterHotkeyOrMark(IncreaseOpacityHotkeyId, modifiers, (uint)'U', IncreaseOpacity);
+        RegisterHotkeyOrMark(DecreaseOpacityHotkeyId, modifiers, (uint)'J', DecreaseOpacity);
+        RegisterHotkeyOrMark(FocusSearchHotkeyId, modifiers, (uint)'F', FocusSearchBar);
+        RegisterHotkeyOrMark(ToggleSearchModeHotkeyId, modifiers, (uint)'S', ToggleSearchMode);
+        RegisterHotkeyOrMark(ExitAppHotkeyId, modifiers, (uint)'Q', ExitApplication);
+        RegisterHotkeyOrMark(TogglePlaybackHotkeyId, modifiers, (uint)'P', TogglePlayback);
+        RegisterHotkeyOrMark(IncreaseVolumeHotkeyId, modifiers, NativeMethods.VK_UP, IncreaseVolume);
+        RegisterHotkeyOrMark(DecreaseVolumeHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseVolume);
+        RegisterHotkeyOrMark(ToggleMuteHotkeyId, modifiers, (uint)'M', ToggleMute);
+        RegisterHotkeyOrMark(NavigateHomeHotkeyId, modifiers, (uint)'H', ForceTheaterMode);
+        RegisterHotkeyOrMark(PreviousVideoHotkeyId, modifiers, NativeMethods.VK_LEFT, PreviousVideo);
+        RegisterHotkeyOrMark(NextVideoHotkeyId, modifiers, NativeMethods.VK_RIGHT, NextVideo);
+        RegisterHotkeyOrMark(ToggleCheatSheetHotkeyId, modifiers, (uint)'C', ToggleCheatSheet);
 
-        if (!_globalHotkeyService.Register(ToggleVisibilityHotkeyId, modifiers, (uint)'O', ToggleVisibility))
+        var seekBackRegistered = RegisterHotkeyOrMark(SeekBackwardHotkeyId, modifiers, (uint)'K', SeekBackward);
+        if (!seekBackRegistered)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+O hotkey.");
+            _ = RegisterHotkeyOrMark(SeekBackwardHotkeyId, modifiers, NativeMethods.VK_OEM_COMMA, SeekBackward);
         }
 
-        if (!_globalHotkeyService.Register(ToggleInteractHotkeyId, modifiers, (uint)'I', ToggleInteractMode))
+        var seekForwardRegistered = RegisterHotkeyOrMark(SeekForwardHotkeyId, modifiers, (uint)'L', SeekForward);
+        if (!seekForwardRegistered)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+I hotkey.");
+            _ = RegisterHotkeyOrMark(SeekForwardHotkeyId, modifiers, NativeMethods.VK_OEM_PERIOD, SeekForward);
+        }
+    }
+
+    private bool RegisterHotkeyOrMark(int id, uint modifiers, uint virtualKey, Action callback)
+    {
+        if (_globalHotkeyService is null)
+        {
+            _hasHotkeyRegistrationFailure = true;
+            return false;
         }
 
-        if (!_globalHotkeyService.Register(IncreaseOpacityHotkeyId, modifiers, (uint)'U', IncreaseOpacity))
+        var registered = _globalHotkeyService.Register(id, modifiers, virtualKey, callback);
+        if (!registered)
         {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+U hotkey.");
+            _hasHotkeyRegistrationFailure = true;
         }
 
-        if (!_globalHotkeyService.Register(DecreaseOpacityHotkeyId, modifiers, (uint)'J', DecreaseOpacity))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+J hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(FocusSearchHotkeyId, modifiers, (uint)'F', FocusSearchBar))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+F hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(ToggleSearchModeHotkeyId, modifiers, (uint)'S', ToggleSearchMode))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+S hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(ExitAppHotkeyId, modifiers, (uint)'Q', ExitApplication))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Q hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(TogglePlaybackHotkeyId, modifiers, (uint)'P', TogglePlayback))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+P hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(IncreaseVolumeHotkeyId, modifiers, NativeMethods.VK_UP, IncreaseVolume))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Up hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(DecreaseVolumeHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseVolume))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Down hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(SeekBackwardHotkeyId, modifiers, (uint)'K', SeekBackward) &&
-            !_globalHotkeyService.Register(SeekBackwardHotkeyId, modifiers, NativeMethods.VK_OEM_COMMA, SeekBackward))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+K (or Ctrl+Alt+,) hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(SeekForwardHotkeyId, modifiers, (uint)'L', SeekForward) &&
-            !_globalHotkeyService.Register(SeekForwardHotkeyId, modifiers, NativeMethods.VK_OEM_PERIOD, SeekForward))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+L (or Ctrl+Alt+.) hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(ToggleMuteHotkeyId, modifiers, (uint)'M', ToggleMute))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+M hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(NavigateHomeHotkeyId, modifiers, (uint)'H', ForceTheaterMode))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+H hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(PreviousVideoHotkeyId, modifiers, NativeMethods.VK_LEFT, PreviousVideo))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Left hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(NextVideoHotkeyId, modifiers, NativeMethods.VK_RIGHT, NextVideo))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+Right hotkey.");
-        }
-
-        if (!_globalHotkeyService.Register(ToggleCheatSheetHotkeyId, modifiers, (uint)'C', ToggleCheatSheet))
-        {
-            throw new Win32Exception(Marshal.GetLastWin32Error(), "Failed to register Ctrl+Alt+C hotkey.");
-        }
+        return registered;
     }
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
@@ -329,7 +291,7 @@ public partial class MainWindow : Window
 
     private static DrawingIcon? LoadTrayIconFromResources()
     {
-        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/playlayer_icon.ico"));
+        var resource = System.Windows.Application.GetResourceStream(new Uri("pack://application:,,,/Assets/overlay_icon.ico"));
         if (resource is null)
         {
             return null;
