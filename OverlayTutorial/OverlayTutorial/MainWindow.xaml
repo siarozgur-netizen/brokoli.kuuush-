@@ -16,7 +16,8 @@
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
 
-        <Border BorderBrush="#24FFFFFF"
+        <Border x:Name="StateBorder"
+                BorderBrush="#14FFFFFF"
                 BorderThickness="1"
                 CornerRadius="6"
                 Margin="1"
