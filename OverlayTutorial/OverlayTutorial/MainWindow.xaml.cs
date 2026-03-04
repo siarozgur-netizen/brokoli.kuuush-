@@ -1323,9 +1323,12 @@ public partial class MainWindow : Window
         }
 
         var isBrowseMode = _layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home;
+        var hideMasthead = _layoutMode != OverlayLayoutMode.Home;
         var overflowY = isBrowseMode ? "auto" : "hidden";
         var overscroll = isBrowseMode ? "auto" : "none";
         var overflowX = "hidden";
+        var mastheadDisplay = hideMasthead ? "none" : "unset";
+        var contentMarginTop = hideMasthead ? "0" : "var(--ytd-masthead-height, 56px)";
         const string styleId = "overlay-search-mode-style";
         var script = $$"""
             (() => {
@@ -1338,10 +1341,10 @@ public partial class MainWindow : Window
 
               style.textContent = `
                 ytd-masthead, #masthead-container, tp-yt-app-header-layout #masthead {
-                  display: none !important;
+                  display: {{mastheadDisplay}} !important;
                 }
                 ytd-app, ytd-page-manager, #page-manager {
-                  margin-top: 0 !important;
+                  margin-top: {{contentMarginTop}} !important;
                   padding-top: 0 !important;
                   overflow-x: {{overflowX}} !important;
                   overflow-y: {{overflowY}} !important;
@@ -1388,6 +1391,6 @@ public partial class MainWindow : Window
         }
 
         // Home mode needs denser layout so users can browse and pick videos comfortably.
-        OverlayWebView.ZoomFactor = mode == OverlayLayoutMode.Home ? 0.75 : 1.0;
+        OverlayWebView.ZoomFactor = mode == OverlayLayoutMode.Home ? 0.90 : 1.0;
     }
 }
