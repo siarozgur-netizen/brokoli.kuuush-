@@ -577,7 +577,9 @@ public partial class MainWindow : Window
     {
         _suspendAutoTheaterFromVideoUrl = true;
         ApplyLayoutMode(OverlayLayoutMode.Home, animate: true, showIndicator: true);
+        SetInteractMode(true, showIndicator: false);
         NavigateTo(YouTubeHomeUrl);
+        OverlayWebView.Focus();
         ShowHotkeyFeedback("HOME MODE");
         PlayFeedbackTone();
     }

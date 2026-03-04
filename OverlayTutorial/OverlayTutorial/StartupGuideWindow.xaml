@@ -30,6 +30,10 @@
                        FontSize="12"
                        FontWeight="SemiBold"
                        Margin="0,0,0,6" />
+            <TextBlock Text="All shortcuts use Ctrl + Alt"
+                       Foreground="#BFD8EA"
+                       FontSize="11"
+                       Margin="0,0,0,8" />
 
             <WrapPanel Margin="0,0,0,10">
                 <Border Background="#2A4D63"
@@ -38,7 +42,7 @@
                         CornerRadius="8"
                         Padding="8,4"
                         Margin="0,0,6,6">
-                    <TextBlock Text="C  Guide"
+                    <TextBlock Text="Ctrl + Alt + C  Guide"
                                Foreground="White"
                                FontSize="13"
                                FontWeight="SemiBold" />
@@ -49,7 +53,7 @@
                         CornerRadius="8"
                         Padding="8,4"
                         Margin="0,0,6,6">
-                    <TextBlock Text="H  Home"
+                    <TextBlock Text="Ctrl + Alt + H  Home"
                                Foreground="White"
                                FontSize="13"
                                FontWeight="SemiBold" />
@@ -60,7 +64,7 @@
                         CornerRadius="8"
                         Padding="8,4"
                         Margin="0,0,6,6">
-                    <TextBlock Text="S  Search"
+                    <TextBlock Text="Ctrl + Alt + S  Search"
                                Foreground="White"
                                FontSize="13"
                                FontWeight="SemiBold" />
@@ -71,7 +75,7 @@
                         CornerRadius="8"
                         Padding="8,4"
                         Margin="0,0,6,6">
-                    <TextBlock Text="O  Show/Hide"
+                    <TextBlock Text="Ctrl + Alt + O  Show/Hide"
                                Foreground="White"
                                FontSize="13"
                                FontWeight="SemiBold" />
@@ -82,7 +86,18 @@
                         CornerRadius="8"
                         Padding="8,4"
                         Margin="0,0,6,6">
-                    <TextBlock Text="P  Play/Pause"
+                    <TextBlock Text="Ctrl + Alt + P  Play/Pause"
+                               Foreground="White"
+                               FontSize="13"
+                               FontWeight="SemiBold" />
+                </Border>
+                <Border Background="#304B2A"
+                        BorderBrush="#8AF090"
+                        BorderThickness="1"
+                        CornerRadius="8"
+                        Padding="8,4"
+                        Margin="0,0,6,6">
+                    <TextBlock Text="Ctrl + Alt + K / L  -10s / +10s"
                                Foreground="White"
                                FontSize="13"
                                FontWeight="SemiBold" />
@@ -98,7 +113,7 @@
                        Foreground="#DCE5EE"
                        FontSize="11"
                        Margin="0,0,0,2" />
-            <TextBlock Text="K/L or ,/. Seek ±10s • Up/Down Volume"
+            <TextBlock Text=",/. Seek fallback ±10s • Up/Down Volume"
                        Foreground="#DCE5EE"
                        FontSize="11"
                        Margin="0,0,0,2" />
