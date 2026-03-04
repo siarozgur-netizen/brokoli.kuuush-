@@ -1,3 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256" fill="none">
-  <path fill="#FFFFFF" fill-rule="evenodd" d="M71 88C63 88 56 95 56 103V140C56 148 63 155 71 155H89L105 171C108 174 113 174 116 171L128 159L140 171C143 174 148 174 151 171L167 155H185C193 155 200 148 200 140V103C200 95 193 88 185 88H71ZM123 108V136L147 122L123 108Z" clip-rule="evenodd"/>
+  <rect x="16" y="16" width="224" height="224" rx="50" fill="#12161D"/>
+  <rect x="20" y="20" width="216" height="216" rx="46" stroke="#2A3443" stroke-width="2"/>
+
+  <path fill="#FFFFFF" fill-rule="evenodd" d="M78 92C70 92 64 98 64 106V140C64 148 70 154 78 154H96L108 166C111 169 115 169 118 166L128 156L138 166C141 169 145 169 148 166L160 154H178C186 154 192 148 192 140V106C192 98 186 92 178 92H78ZM121 109V137L145 123L121 109Z" clip-rule="evenodd"/>
 </svg>
