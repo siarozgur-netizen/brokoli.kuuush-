@@ -51,7 +51,7 @@ public partial class MainWindow : Window
     private const double DefaultOpacity = 1.00;
     private const string YouTubeHomeUrl = "https://www.youtube.com";
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
-    private const int LayoutAnimationMilliseconds = 160;
+    private const int LayoutAnimationMilliseconds = 120;
     private const int IndicatorVisibleMilliseconds = 1200;
     private const int HotkeyHintVisibleMilliseconds = 5000;
     private const double VolumeStep = 0.10;
@@ -78,6 +78,11 @@ public partial class MainWindow : Window
     private bool _isRecoveringWebView;
     private bool _hasHotkeyRegistrationFailure;
     private StartupGuideWindow? _guideWindow;
+    private string _lastChromeProfileKey = string.Empty;
+    private DateTime _lastChromeProfileAtUtc = DateTime.MinValue;
+    private string _lastPerfProfileKey = string.Empty;
+    private DateTime _lastPerfProfileAtUtc = DateTime.MinValue;
+    private string _lastNavigateUrl = string.Empty;
     private WinForms.NotifyIcon? _notifyIcon;
     private WinForms.ContextMenuStrip? _trayMenu;
 
@@ -577,7 +582,6 @@ public partial class MainWindow : Window
     {
         _suspendAutoTheaterFromVideoUrl = false;
         ApplyLayoutMode(OverlayLayoutMode.Home, animate: true, showIndicator: true);
-        SetInteractMode(true, showIndicator: false);
         NavigateTo(YouTubeHomeUrl);
         OverlayWebView.Focus();
         ShowHotkeyFeedback("MINI YOUTUBE");
@@ -718,6 +722,7 @@ public partial class MainWindow : Window
         }
 
         UpdateStateBorder();
+        _ = ApplyPerformanceProfileAsync();
     }
 
     private void UpdateIndicatorText()
@@ -771,6 +776,7 @@ public partial class MainWindow : Window
         }
 
         _ = ApplySearchModePageChromeAsync();
+        _ = ApplyPerformanceProfileAsync();
 
         if (_pendingVideoUiOptimization && IsVideoUrl(OverlayWebView.Source.ToString()))
         {
@@ -897,7 +903,7 @@ public partial class MainWindow : Window
             })();
             """;
 
-        for (var attempt = 0; attempt < 6; attempt++)
+        for (var attempt = 0; attempt < 4; attempt++)
         {
             if (token.IsCancellationRequested)
             {
@@ -915,7 +921,7 @@ public partial class MainWindow : Window
 
             try
             {
-                await Task.Delay(220, token);
+                await Task.Delay(160, token);
             }
             catch (TaskCanceledException)
             {
@@ -1118,6 +1124,7 @@ public partial class MainWindow : Window
 
         UpdateWebViewZoomForMode(mode);
         _ = ApplySearchModePageChromeAsync();
+        _ = ApplyPerformanceProfileAsync();
     }
 
     private void AnimateWindowLayout(double targetLeft, double targetTop, double targetWidth, double targetHeight)
@@ -1174,6 +1181,13 @@ public partial class MainWindow : Window
         {
             return;
         }
+
+        if (string.Equals(_lastNavigateUrl, url, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        _lastNavigateUrl = url;
 
         if (OverlayWebView.CoreWebView2 is not null)
         {
@@ -1324,11 +1338,23 @@ public partial class MainWindow : Window
 
         var isBrowseMode = _layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home;
         var hideMasthead = _layoutMode != OverlayLayoutMode.Home;
+        var homeMode = _layoutMode == OverlayLayoutMode.Home;
         var overflowY = isBrowseMode ? "auto" : "hidden";
         var overscroll = isBrowseMode ? "auto" : "none";
         var overflowX = "hidden";
         var mastheadDisplay = hideMasthead ? "none" : "unset";
         var contentMarginTop = hideMasthead ? "0" : "var(--ytd-masthead-height, 56px)";
+        var movingThumbDisplay = homeMode ? "none" : "unset";
+        var shortsShelfDisplay = homeMode ? "none" : "unset";
+        var profileKey = $"{_layoutMode}:{hideMasthead}:{overflowY}:{overscroll}:{movingThumbDisplay}:{shortsShelfDisplay}";
+        var now = DateTime.UtcNow;
+        if (profileKey == _lastChromeProfileKey && (now - _lastChromeProfileAtUtc).TotalMilliseconds < 350)
+        {
+            return;
+        }
+
+        _lastChromeProfileKey = profileKey;
+        _lastChromeProfileAtUtc = now;
         const string styleId = "overlay-search-mode-style";
         var script = $$"""
             (() => {
@@ -1354,6 +1380,12 @@ public partial class MainWindow : Window
                   overflow-x: {{overflowX}} !important;
                   overflow-y: {{overflowY}} !important;
                   overscroll-behavior: {{overscroll}} !important;
+                }
+                ytd-moving-thumbnail-renderer {
+                  display: {{movingThumbDisplay}} !important;
+                }
+                ytd-reel-shelf-renderer {
+                  display: {{shortsShelfDisplay}} !important;
                 }
               `;
             })();
@@ -1392,5 +1424,61 @@ public partial class MainWindow : Window
 
         // Home mode needs denser layout so users can browse and pick videos comfortably.
         OverlayWebView.ZoomFactor = mode == OverlayLayoutMode.Home ? 0.90 : 1.0;
+    }
+
+    private async Task ApplyPerformanceProfileAsync()
+    {
+        if (OverlayWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var lowPower = !_isInteractMode || _layoutMode == OverlayLayoutMode.Home;
+        var profileKey = lowPower ? "low" : "normal";
+        var now = DateTime.UtcNow;
+        if (profileKey == _lastPerfProfileKey && (now - _lastPerfProfileAtUtc).TotalMilliseconds < 500)
+        {
+            return;
+        }
+
+        _lastPerfProfileKey = profileKey;
+        _lastPerfProfileAtUtc = now;
+        var script = lowPower
+            ? """
+            (() => {
+              const player = document.getElementById('movie_player');
+              if (!player) return false;
+              try {
+                if (typeof player.setPlaybackQualityRange === 'function') {
+                  player.setPlaybackQualityRange('small', 'medium');
+                }
+                if (typeof player.setPlaybackQuality === 'function') {
+                  player.setPlaybackQuality('medium');
+                }
+              } catch {}
+              return true;
+            })();
+            """
+            : """
+            (() => {
+              const player = document.getElementById('movie_player');
+              if (!player) return false;
+              try {
+                if (typeof player.setPlaybackQuality === 'function') {
+                  player.setPlaybackQuality('auto');
+                }
+              } catch {}
+              return true;
+            })();
+            """;
+
+        try
+        {
+            _ = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+        }
+        catch
+        {
+            // Ignore script failures; performance profile is best-effort only.
+        }
     }
 }
