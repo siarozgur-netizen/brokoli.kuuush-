@@ -80,6 +80,46 @@
                    IsHitTestVisible="False"
                    Panel.ZIndex="1000" />
 
+        <Border x:Name="ActionOsdPanel"
+                HorizontalAlignment="Center"
+                VerticalAlignment="Center"
+                MinWidth="190"
+                MaxWidth="260"
+                Background="#D9101010"
+                BorderBrush="#55FFFFFF"
+                BorderThickness="1"
+                CornerRadius="10"
+                Padding="10,8"
+                Visibility="Collapsed"
+                Opacity="0"
+                IsHitTestVisible="False"
+                Panel.ZIndex="1030"
+                RenderTransformOrigin="0.5,0.5">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="ActionOsdScaleTransform" ScaleX="0.96" ScaleY="0.96" />
+            </Border.RenderTransform>
+            <StackPanel>
+                <Rectangle x:Name="ActionOsdAccentBar"
+                           Height="2"
+                           RadiusX="1"
+                           RadiusY="1"
+                           Fill="#6ACDFF"
+                           Margin="0,0,0,7" />
+                <TextBlock x:Name="ActionOsdTitleTextBlock"
+                           Text="ACTION"
+                           Foreground="#F5FFFFFF"
+                           FontSize="12"
+                           FontWeight="SemiBold"
+                           HorizontalAlignment="Center"
+                           Margin="0,0,0,1" />
+                <TextBlock x:Name="ActionOsdDetailTextBlock"
+                           Text="+10s"
+                           Foreground="#CFFFFFFF"
+                           FontSize="11"
+                           HorizontalAlignment="Center" />
+            </StackPanel>
+        </Border>
+
         <Border x:Name="HotkeyOverlayPanel"
                 HorizontalAlignment="Center"
                 VerticalAlignment="Center"

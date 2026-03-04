@@ -54,6 +54,7 @@ public partial class MainWindow : Window
     private const int LayoutAnimationMilliseconds = 120;
     private const int IndicatorVisibleMilliseconds = 1200;
     private const int HotkeyHintVisibleMilliseconds = 5000;
+    private const int ActionOsdVisibleMilliseconds = 900;
     private const double VolumeStep = 0.10;
     private const string AppDisplayName = "PlayLayer";
     private static readonly bool EnableAudioFeedback = false;
@@ -71,6 +72,7 @@ public partial class MainWindow : Window
     private OverlayLayoutMode _layoutMode = OverlayLayoutMode.Normal;
     private readonly DispatcherTimer _indicatorHideTimer = new();
     private readonly DispatcherTimer _hotkeyHintHideTimer = new();
+    private readonly DispatcherTimer _actionOsdHideTimer = new();
     private bool _pendingVideoUiOptimization;
     private int _layoutTransitionVersion;
     private bool _suspendAutoTheaterFromVideoUrl;
@@ -97,6 +99,8 @@ public partial class MainWindow : Window
         _indicatorHideTimer.Tick += OnIndicatorHideTimerTick;
         _hotkeyHintHideTimer.Interval = TimeSpan.FromMilliseconds(HotkeyHintVisibleMilliseconds);
         _hotkeyHintHideTimer.Tick += OnHotkeyHintHideTimerTick;
+        _actionOsdHideTimer.Interval = TimeSpan.FromMilliseconds(ActionOsdVisibleMilliseconds);
+        _actionOsdHideTimer.Tick += OnActionOsdHideTimerTick;
     }
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
@@ -162,6 +166,7 @@ public partial class MainWindow : Window
         CloseGuideWindow();
         _indicatorHideTimer.Tick -= OnIndicatorHideTimerTick;
         _hotkeyHintHideTimer.Tick -= OnHotkeyHintHideTimerTick;
+        _actionOsdHideTimer.Tick -= OnActionOsdHideTimerTick;
     }
 
     private void RegisterGlobalHotkeys()
@@ -363,17 +368,23 @@ public partial class MainWindow : Window
         const string script = """
             (() => {
               const video = document.querySelector('video');
-              if (!video) return false;
-              if (video.paused) video.play();
-              else video.pause();
-              return true;
+              if (!video) return "NA";
+              if (video.paused) {
+                video.play();
+                return "PLAYING";
+              }
+
+              video.pause();
+              return "PAUSED";
             })();
             """;
 
         try
         {
-            _ = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+            var result = await OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+            var state = result.Trim('\"');
             ShowHotkeyFeedback("PLAY/PAUSE");
+            ShowActionOsd("PLAYBACK", state == "NA" ? "UNAVAILABLE" : state, Color.FromRgb(0x9C, 0xE6, 0x7B));
             PlayFeedbackTone();
         }
         catch
@@ -441,10 +452,12 @@ public partial class MainWindow : Window
             if (int.TryParse(trimmed, out var percent))
             {
                 ShowHotkeyFeedback($"VOLUME {percent}%");
+                ShowActionOsd("VOLUME", $"{percent}%", Color.FromRgb(0xA7, 0xE2, 0x76));
             }
             else
             {
                 ShowHotkeyFeedback("VOLUME");
+                ShowActionOsd("VOLUME", "UPDATED", Color.FromRgb(0xA7, 0xE2, 0x76));
             }
 
             PlayFeedbackTone();
@@ -500,10 +513,12 @@ public partial class MainWindow : Window
             if (string.Equals(state, "NA", StringComparison.OrdinalIgnoreCase))
             {
                 ShowHotkeyFeedback("MUTE N/A");
+                ShowActionOsd("AUDIO", "UNAVAILABLE", Color.FromRgb(0xE3, 0x88, 0x88));
             }
             else
             {
                 ShowHotkeyFeedback($"MUTE {state}");
+                ShowActionOsd("AUDIO", string.Equals(state, "ON", StringComparison.OrdinalIgnoreCase) ? "MUTED" : "UNMUTED", Color.FromRgb(0xD6, 0xB6, 0xFF));
             }
 
             PlayFeedbackTone();
@@ -660,6 +675,7 @@ public partial class MainWindow : Window
 
             var label = seconds > 0 ? "+10s" : "-10s";
             ShowHotkeyFeedback($"SEEK {label}");
+            ShowActionOsd("SEEK", seconds > 0 ? "FORWARD +10s" : "BACK -10s", Color.FromRgb(0x6A, 0xCD, 0xFF));
             PlayFeedbackTone();
         }
         catch
@@ -718,6 +734,7 @@ public partial class MainWindow : Window
         if (showIndicator)
         {
             ShowModeIndicatorTemporarily();
+            ShowActionOsd("MODE", _isInteractMode ? "INTERACT" : "PASS", _isInteractMode ? Color.FromRgb(0x5A, 0xE6, 0xFF) : Color.FromRgb(0xA0, 0xA0, 0xA0));
             PlayFeedbackTone();
         }
 
@@ -1223,6 +1240,31 @@ public partial class MainWindow : Window
         ShowModeIndicatorTemporarily();
     }
 
+    private void ShowActionOsd(string title, string detail, Color accentColor)
+    {
+        ActionOsdTitleTextBlock.Text = title;
+        ActionOsdDetailTextBlock.Text = detail;
+        ActionOsdAccentBar.Fill = new SolidColorBrush(accentColor);
+
+        ActionOsdPanel.Visibility = Visibility.Visible;
+        ActionOsdPanel.BeginAnimation(OpacityProperty, null);
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+
+        ActionOsdPanel.Opacity = 0;
+        ActionOsdScaleTransform.ScaleX = 0.96;
+        ActionOsdScaleTransform.ScaleY = 0.96;
+
+        var duration = TimeSpan.FromMilliseconds(95);
+        var easing = new QuadraticEase { EasingMode = EasingMode.EaseOut };
+        ActionOsdPanel.BeginAnimation(OpacityProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(1, duration) { EasingFunction = easing });
+
+        _actionOsdHideTimer.Stop();
+        _actionOsdHideTimer.Start();
+    }
+
     private void SetNavigationLoading(bool isLoading)
     {
         var shouldShow = isLoading && _layoutMode == OverlayLayoutMode.Search;
@@ -1255,6 +1297,20 @@ public partial class MainWindow : Window
         _hotkeyHintHideTimer.Stop();
         CloseGuideWindow();
         HotkeyOverlayPanel.Visibility = Visibility.Collapsed;
+    }
+
+    private void OnActionOsdHideTimerTick(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _actionOsdHideTimer.Stop();
+
+        var duration = TimeSpan.FromMilliseconds(160);
+        var easing = new QuadraticEase { EasingMode = EasingMode.EaseIn };
+        var fadeOut = new DoubleAnimation(0, duration) { EasingFunction = easing };
+        fadeOut.Completed += (_, _) => ActionOsdPanel.Visibility = Visibility.Collapsed;
+        ActionOsdPanel.BeginAnimation(OpacityProperty, fadeOut);
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleXProperty, new DoubleAnimation(0.96, duration) { EasingFunction = easing });
+        ActionOsdScaleTransform.BeginAnimation(ScaleTransform.ScaleYProperty, new DoubleAnimation(0.96, duration) { EasingFunction = easing });
     }
 
     private static void PlayFeedbackTone()
