@@ -22,7 +22,8 @@ public partial class MainWindow : Window
     private enum OverlayLayoutMode
     {
         Normal = 0,
-        Search = 1
+        Search = 1,
+        Home = 2
     }
 
     private const int ToggleVisibilityHotkeyId = 1;
@@ -40,13 +41,15 @@ public partial class MainWindow : Window
     private const int SeekBackwardHotkeyId = 11;
     private const int SeekForwardHotkeyId = 12;
     private const int ToggleMuteHotkeyId = 13;
-    private const int NavigateHomeHotkeyId = 14;
+    private const int ForceTheaterHotkeyId = 14;
+    private const int OpenHomeHotkeyId = 18;
     private const int ToggleCheatSheetHotkeyId = 17;
 
     private const double MinOpacity = 0.40;
     private const double MaxOpacity = 1.00;
     private const double OpacityStep = 0.10;
     private const double DefaultOpacity = 1.00;
+    private const string YouTubeHomeUrl = "https://www.youtube.com";
     private const string YouTubeSearchUrlPrefix = "https://www.youtube.com/results?search_query=";
     private const int LayoutAnimationMilliseconds = 160;
     private const int IndicatorVisibleMilliseconds = 1200;
@@ -54,8 +57,7 @@ public partial class MainWindow : Window
     private const double VolumeStep = 0.10;
     private const string AppDisplayName = "PlayLayer";
     private static readonly bool EnableAudioFeedback = false;
-    private static readonly Brush PassBorderBrush = new SolidColorBrush(Color.FromArgb(0x44, 0xFF, 0xFF, 0xFF));
-    private static readonly Brush InteractBorderBrush = new SolidColorBrush(Color.FromArgb(0xFF, 0x37, 0xD8, 0xFF));
+    private static readonly Brush InteractBorderBrush = new SolidColorBrush(Color.FromArgb(0xCC, 0x5A, 0xE6, 0xFF));
 
     private readonly OverlayLayoutService _overlayLayoutService = new();
     private readonly ConfigService _configService = new();
@@ -75,6 +77,7 @@ public partial class MainWindow : Window
     private CancellationTokenSource? _videoOptimizeCts;
     private bool _isRecoveringWebView;
     private bool _hasHotkeyRegistrationFailure;
+    private StartupGuideWindow? _guideWindow;
     private WinForms.NotifyIcon? _notifyIcon;
     private WinForms.ContextMenuStrip? _trayMenu;
 
@@ -151,6 +154,7 @@ public partial class MainWindow : Window
         _videoOptimizeCts?.Cancel();
         _videoOptimizeCts?.Dispose();
         _videoOptimizeCts = null;
+        CloseGuideWindow();
         _indicatorHideTimer.Tick -= OnIndicatorHideTimerTick;
         _hotkeyHintHideTimer.Tick -= OnHotkeyHintHideTimerTick;
     }
@@ -174,7 +178,8 @@ public partial class MainWindow : Window
         RegisterHotkeyOrMark(IncreaseVolumeHotkeyId, modifiers, NativeMethods.VK_UP, IncreaseVolume);
         RegisterHotkeyOrMark(DecreaseVolumeHotkeyId, modifiers, NativeMethods.VK_DOWN, DecreaseVolume);
         RegisterHotkeyOrMark(ToggleMuteHotkeyId, modifiers, (uint)'M', ToggleMute);
-        RegisterHotkeyOrMark(NavigateHomeHotkeyId, modifiers, (uint)'H', ForceTheaterMode);
+        RegisterHotkeyOrMark(ForceTheaterHotkeyId, modifiers, (uint)'T', ForceTheaterMode);
+        RegisterHotkeyOrMark(OpenHomeHotkeyId, modifiers, (uint)'H', OpenHomeMode);
         RegisterHotkeyOrMark(PreviousVideoHotkeyId, modifiers, NativeMethods.VK_LEFT, PreviousVideo);
         RegisterHotkeyOrMark(NextVideoHotkeyId, modifiers, NativeMethods.VK_RIGHT, NextVideo);
         RegisterHotkeyOrMark(ToggleCheatSheetHotkeyId, modifiers, (uint)'C', ToggleCheatSheet);
@@ -307,9 +312,9 @@ public partial class MainWindow : Window
 
     private void ToggleInteractMode()
     {
-        if (_layoutMode == OverlayLayoutMode.Search)
+        if (_layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home)
         {
-            // No-op by design: search mode must stay interactive.
+            // No-op by design: search and home modes must stay interactive.
             return;
         }
 
@@ -568,18 +573,58 @@ public partial class MainWindow : Window
         PlayFeedbackTone();
     }
 
+    private void OpenHomeMode()
+    {
+        _suspendAutoTheaterFromVideoUrl = true;
+        ApplyLayoutMode(OverlayLayoutMode.Home, animate: true, showIndicator: true);
+        NavigateTo(YouTubeHomeUrl);
+        ShowHotkeyFeedback("HOME MODE");
+        PlayFeedbackTone();
+    }
+
     private void ToggleCheatSheet()
     {
-        if (HotkeyOverlayPanel.Visibility == Visibility.Visible)
+        if (_guideWindow is not null)
         {
             _hotkeyHintHideTimer.Stop();
-            HotkeyOverlayPanel.Visibility = Visibility.Collapsed;
+            CloseGuideWindow();
             return;
         }
 
-        HotkeyOverlayPanel.Visibility = Visibility.Visible;
+        ShowGuideWindow();
         _hotkeyHintHideTimer.Stop();
         _hotkeyHintHideTimer.Start();
+    }
+
+    private void ShowGuideWindow()
+    {
+        if (_guideWindow is not null)
+        {
+            return;
+        }
+
+        _guideWindow = new StartupGuideWindow();
+        _guideWindow.Closed += OnGuideWindowClosed;
+        _guideWindow.Show();
+    }
+
+    private void CloseGuideWindow()
+    {
+        if (_guideWindow is null)
+        {
+            return;
+        }
+
+        _guideWindow.Closed -= OnGuideWindowClosed;
+        _guideWindow.Close();
+        _guideWindow = null;
+    }
+
+    private void OnGuideWindowClosed(object? sender, EventArgs e)
+    {
+        _ = sender;
+        _ = e;
+        _guideWindow = null;
     }
 
     private async Task SeekBySecondsAsync(int seconds)
@@ -652,7 +697,7 @@ public partial class MainWindow : Window
 
     private void SetInteractMode(bool interactModeEnabled, bool showIndicator = false)
     {
-        if (_layoutMode == OverlayLayoutMode.Search)
+        if (_layoutMode == OverlayLayoutMode.Search || _layoutMode == OverlayLayoutMode.Home)
         {
             interactModeEnabled = true;
         }
@@ -1031,9 +1076,12 @@ public partial class MainWindow : Window
         var screenWidth = SystemParameters.PrimaryScreenWidth;
         var screenHeight = SystemParameters.PrimaryScreenHeight;
 
-        var size = mode == OverlayLayoutMode.Search
-            ? _overlayLayoutService.CalculateSearchSize(screenWidth, screenHeight)
-            : _overlayLayoutService.CalculateNormalSize(screenWidth, screenHeight);
+        var size = mode switch
+        {
+            OverlayLayoutMode.Search => _overlayLayoutService.CalculateSearchSize(screenWidth, screenHeight),
+            OverlayLayoutMode.Home => _overlayLayoutService.CalculateHomeSize(screenWidth, screenHeight),
+            _ => _overlayLayoutService.CalculateNormalSize(screenWidth, screenHeight)
+        };
         var position = _overlayLayoutService.CalculatePosition(screenWidth, screenHeight, size);
 
         var isSearchMode = mode == OverlayLayoutMode.Search;
@@ -1055,7 +1103,7 @@ public partial class MainWindow : Window
             Height = size.Height;
         }
 
-        if (!isSearchMode)
+        if (!isSearchMode && mode != OverlayLayoutMode.Home)
         {
             SetInteractMode(false, showIndicator);
         }
@@ -1172,14 +1220,22 @@ public partial class MainWindow : Window
 
     private void UpdateStateBorder()
     {
-        StateBorder.BorderBrush = _isInteractMode ? InteractBorderBrush : PassBorderBrush;
-        StateBorder.BorderThickness = _isInteractMode ? new Thickness(2) : new Thickness(1);
+        if (_isInteractMode)
+        {
+            StateBorder.Visibility = Visibility.Visible;
+            StateBorder.BorderBrush = InteractBorderBrush;
+            StateBorder.BorderThickness = new Thickness(2);
+            return;
+        }
+
+        StateBorder.Visibility = Visibility.Collapsed;
     }
 
     private void OnHotkeyHintHideTimerTick(object? sender, EventArgs e)
     {
         _ = sender;
         _hotkeyHintHideTimer.Stop();
+        CloseGuideWindow();
         HotkeyOverlayPanel.Visibility = Visibility.Collapsed;
     }
 

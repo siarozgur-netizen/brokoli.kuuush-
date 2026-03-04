@@ -17,10 +17,11 @@
         </Grid.RowDefinitions>
 
         <Border x:Name="StateBorder"
-                BorderBrush="#14FFFFFF"
+                BorderBrush="#00000000"
                 BorderThickness="1"
                 CornerRadius="6"
                 Margin="1"
+                Visibility="Collapsed"
                 IsHitTestVisible="False"
                 Panel.ZIndex="900" />
 
@@ -114,7 +115,11 @@
                            Foreground="#E6FFFFFF"
                            FontSize="12"
                            Margin="0,0,0,2" />
-                <TextBlock Text="H  Force theater mode"
+                <TextBlock Text="H  Open Home mode (larger)"
+                           Foreground="#E6FFFFFF"
+                           FontSize="12"
+                           Margin="0,0,0,2" />
+                <TextBlock Text="T  Force theater mode"
                            Foreground="#E6FFFFFF"
                            FontSize="12"
                            Margin="0,0,0,2" />

@@ -13,6 +13,9 @@ public sealed class OverlayLayoutService
     private const double SearchWidthRatio = 0.24;
     private const double SearchAspectRatioWidth = 9.0;
     private const double SearchAspectRatioHeight = 16.0;
+    private const double HomeWidthRatio = 0.42;
+    private const double HomeAspectRatioWidth = 16.0;
+    private const double HomeAspectRatioHeight = 9.0;
     private const double HorizontalMarginRatio = 0.03;
     private const double VerticalMarginRatio = 0.03;
 
@@ -38,6 +41,23 @@ public sealed class OverlayLayoutService
         {
             height = maxHeight;
             width = height * (SearchAspectRatioWidth / SearchAspectRatioHeight);
+        }
+
+        return new Size(width, height);
+    }
+
+    public Size CalculateHomeSize(double primaryScreenWidth, double primaryScreenHeight)
+    {
+        _ = primaryScreenHeight;
+        var width = primaryScreenWidth * HomeWidthRatio;
+        var height = width * (HomeAspectRatioHeight / HomeAspectRatioWidth);
+
+        var workArea = SystemParameters.WorkArea;
+        var maxHeight = workArea.Height - (workArea.Height * VerticalMarginRatio * 2);
+        if (height > maxHeight)
+        {
+            height = maxHeight;
+            width = height * (HomeAspectRatioWidth / HomeAspectRatioHeight);
         }
 
         return new Size(width, height);
