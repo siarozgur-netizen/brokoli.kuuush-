@@ -385,6 +385,10 @@ public partial class MainWindow : Window
             var state = result.Trim('\"');
             ShowHotkeyFeedback("PLAY/PAUSE");
             ShowActionOsd("PLAYBACK", state == "NA" ? "UNAVAILABLE" : state, Color.FromRgb(0x9C, 0xE6, 0x7B));
+            if (state == "PLAYING" || state == "PAUSED")
+            {
+                ShowTheaterInPlayerOsd("PLAYBACK", state);
+            }
             PlayFeedbackTone();
         }
         catch
@@ -676,6 +680,7 @@ public partial class MainWindow : Window
             var label = seconds > 0 ? "+10s" : "-10s";
             ShowHotkeyFeedback($"SEEK {label}");
             ShowActionOsd("SEEK", seconds > 0 ? "FORWARD +10s" : "BACK -10s", Color.FromRgb(0x6A, 0xCD, 0xFF));
+            ShowTheaterInPlayerOsd("SEEK", label);
             PlayFeedbackTone();
         }
         catch
@@ -1263,6 +1268,89 @@ public partial class MainWindow : Window
 
         _actionOsdHideTimer.Stop();
         _actionOsdHideTimer.Start();
+    }
+
+    private void ShowTheaterInPlayerOsd(string title, string detail)
+    {
+        if (_layoutMode != OverlayLayoutMode.Normal || OverlayWebView.CoreWebView2 is null)
+        {
+            return;
+        }
+
+        var safeTitle = EscapeJsString(title);
+        var safeDetail = EscapeJsString(detail);
+
+        var script = $$"""
+            (() => {
+              const id = '__playlayer_inplayer_osd';
+              const existing = document.getElementById(id);
+              if (existing) {
+                existing.remove();
+              }
+
+              const host = document.createElement('div');
+              host.id = id;
+              host.style.position = 'fixed';
+              host.style.right = '18px';
+              host.style.bottom = '18px';
+              host.style.zIndex = '2147483647';
+              host.style.pointerEvents = 'none';
+              host.style.padding = '8px 10px';
+              host.style.borderRadius = '10px';
+              host.style.border = '1px solid rgba(255,255,255,0.24)';
+              host.style.background = 'rgba(9,9,9,0.72)';
+              host.style.backdropFilter = 'blur(4px)';
+              host.style.boxShadow = '0 10px 24px rgba(0,0,0,0.45)';
+              host.style.color = '#f3f7ff';
+              host.style.fontFamily = 'Segoe UI, Arial, sans-serif';
+              host.style.minWidth = '116px';
+              host.style.opacity = '0';
+              host.style.transform = 'translateY(8px) scale(0.96)';
+              host.style.transition = 'opacity 120ms ease, transform 120ms ease';
+
+              const titleNode = document.createElement('div');
+              titleNode.textContent = '{{safeTitle}}';
+              titleNode.style.fontSize = '10px';
+              titleNode.style.letterSpacing = '0.9px';
+              titleNode.style.opacity = '0.78';
+              titleNode.style.marginBottom = '1px';
+
+              const detailNode = document.createElement('div');
+              detailNode.textContent = '{{safeDetail}}';
+              detailNode.style.fontSize = '14px';
+              detailNode.style.fontWeight = '600';
+              detailNode.style.lineHeight = '1.1';
+
+              host.appendChild(titleNode);
+              host.appendChild(detailNode);
+              document.body.appendChild(host);
+
+              requestAnimationFrame(() => {
+                host.style.opacity = '1';
+                host.style.transform = 'translateY(0) scale(1)';
+              });
+
+              window.setTimeout(() => {
+                host.style.opacity = '0';
+                host.style.transform = 'translateY(6px) scale(0.97)';
+              }, 720);
+
+              window.setTimeout(() => {
+                if (host.parentNode) host.parentNode.removeChild(host);
+              }, 900);
+            })();
+            """;
+
+        _ = OverlayWebView.CoreWebView2.ExecuteScriptAsync(script);
+    }
+
+    private static string EscapeJsString(string value)
+    {
+        return value
+            .Replace("\\", "\\\\", StringComparison.Ordinal)
+            .Replace("'", "\\'", StringComparison.Ordinal)
+            .Replace("\r", string.Empty, StringComparison.Ordinal)
+            .Replace("\n", string.Empty, StringComparison.Ordinal);
     }
 
     private void SetNavigationLoading(bool isLoading)
